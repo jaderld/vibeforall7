@@ -4,7 +4,7 @@
   "description": "Rend les démarches administratives accessibles : simplification FALC, définitions, détection de formulaires.",
   "version": "1.0.0",
   "permissions": [
-    "activeTab",
+    "tabs",
     "storage",
     "contextMenus",
     "scripting",
@@ -32,7 +32,7 @@
   "content_scripts": [
     {
       "js": [
-        "assets/content-script.js-10mcPeJu.js"
+        "assets/content-script.js-Bv-ekq6i.js"
       ],
       "matches": [
         "<all_urls>"
@@ -51,7 +51,7 @@
         "<all_urls>"
       ],
       "resources": [
-        "assets/content-script.js-10mcPeJu.js"
+        "assets/content-script.js-Bv-ekq6i.js"
       ],
       "use_dynamic_url": false
     }

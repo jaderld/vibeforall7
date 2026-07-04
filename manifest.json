@@ -3,6 +3,7 @@
   "name": "FAILC",
   "description": "Rend les démarches administratives accessibles : simplification FALC, définitions, détection de formulaires.",
   "version": "1.0.0",
+<<<<<<< HEAD
   "permissions": ["activeTab", "storage", "contextMenus", "scripting", "sidePanel"],
   "host_permissions": [
     "http://127.0.0.1:8787/*",
@@ -10,6 +11,10 @@
     "https://api.openai.com/*",
     "https://generativelanguage.googleapis.com/*"
   ],
+=======
+  "permissions": ["tabs", "storage", "contextMenus", "scripting", "sidePanel"],
+  "host_permissions": ["http://127.0.0.1:8787/*", "http://localhost:8787/*"],
+>>>>>>> origin/main
   "action": {
     "default_title": "FAILC",
     "default_icon": {
