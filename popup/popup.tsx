@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 
 type Profile = 'standard' | 'dyslexia' | 'low-vision' | 'anti-epilepsy';
+type AIProvider = 'openai' | 'gemini';
 type ContactInfo = { telephone: string; email: string; adresse: string; horaires: string; };
 
 type AnalysisData = {
@@ -18,8 +19,25 @@ const profiles: Array<{ id: Profile; label: string }> = [
   { id: 'anti-epilepsy', label: 'Anti-épilepsie' }
 ];
 
+const aiProviders: Array<{ id: AIProvider; label: string; note: string }> = [
+  { id: 'openai', label: 'OpenAI', note: 'Utilise l’API OpenAI avec GPT-4o mini.' },
+  { id: 'gemini', label: 'Gemini', note: 'Utilise l’API Gemini avec Gemini 1.5 Flash.' },
+];
+
+const AI_STORAGE_KEYS = {
+  provider: 'failcAiProvider',
+  openaiKey: 'failcOpenAiApiKey',
+  geminiKey: 'failcGeminiApiKey',
+  settingsDone: 'failcAiSettingsDone',
+} as const;
+
 const Popup = () => {
   const [activeProfile, setActiveProfile] = useState<Profile>('standard');
+  const [aiProvider, setAiProvider] = useState<AIProvider>('openai');
+  const [openAiApiKey, setOpenAiApiKey] = useState<string>('');
+  const [geminiApiKey, setGeminiApiKey] = useState<string>('');
+  const [aiStatus, setAiStatus] = useState<string>('');
+  const [showAiSettings, setShowAiSettings] = useState<boolean>(true);
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [hasModifiedPage, setHasModifiedPage] = useState<boolean>(false);
@@ -45,6 +63,29 @@ useEffect(() => {
     chrome.storage.local.get(['failcProfile'], (result) => {
       setActiveProfile((result.failcProfile as Profile) || 'standard');
     });
+
+    chrome.storage.local.get(
+      [AI_STORAGE_KEYS.provider, AI_STORAGE_KEYS.openaiKey, AI_STORAGE_KEYS.geminiKey, AI_STORAGE_KEYS.settingsDone],
+      (result) => {
+        const savedProvider = result[AI_STORAGE_KEYS.provider] as AIProvider | undefined;
+        const savedOpenAiKey = (result[AI_STORAGE_KEYS.openaiKey] as string) || '';
+        const savedGeminiKey = (result[AI_STORAGE_KEYS.geminiKey] as string) || '';
+        const savedSettingsDone = Boolean(result[AI_STORAGE_KEYS.settingsDone]);
+
+        if (savedProvider) {
+          setAiProvider(savedProvider);
+        } else if (savedGeminiKey && !savedOpenAiKey) {
+          setAiProvider('gemini');
+        } else {
+          setAiProvider('openai');
+        }
+        setOpenAiApiKey(savedOpenAiKey);
+        setGeminiApiKey(savedGeminiKey);
+
+        const hasAnyKey = Boolean(savedOpenAiKey.trim() || savedGeminiKey.trim());
+        setShowAiSettings(!(savedSettingsDone && hasAnyKey));
+      },
+    );
 
     // 3. Lancement automatique de l'analyse
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -91,6 +132,26 @@ useEffect(() => {
     });
   };
 
+  const saveAiSettings = () => {
+    const selectedKey = aiProvider === 'openai' ? openAiApiKey.trim() : geminiApiKey.trim();
+    if (!selectedKey) {
+      setAiStatus('Veuillez renseigner la clé API du fournisseur sélectionné.');
+      window.setTimeout(() => setAiStatus(''), 3000);
+      return;
+    }
+
+    chrome.storage.local.set({
+      [AI_STORAGE_KEYS.provider]: aiProvider,
+      [AI_STORAGE_KEYS.openaiKey]: openAiApiKey.trim(),
+      [AI_STORAGE_KEYS.geminiKey]: geminiApiKey.trim(),
+      [AI_STORAGE_KEYS.settingsDone]: true,
+    }, () => {
+      setAiStatus('Paramètres IA enregistrés.');
+      setShowAiSettings(false);
+      window.setTimeout(() => setAiStatus(''), 2500);
+    });
+  };
+
   const triggerPageModifications = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
@@ -103,7 +164,7 @@ useEffect(() => {
   };
 
   return (
-    <div style={{ width: '100%', minHeight: '100vh', padding: 18, fontFamily: 'Arial, sans-serif', background: '#f8fafc', color: '#0f172a' }}>
+    <div style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 72, fontFamily: 'Arial, sans-serif', background: '#f8fafc', color: '#0f172a' }}>
       
       {/* En-tête */}
       <div style={{ background: 'linear-gradient(135deg, #0b5fff 0%, #2563eb 100%)', color: '#fff', padding: 16, borderRadius: 12, marginBottom: 16 }}>
@@ -131,6 +192,69 @@ useEffect(() => {
           ))}
         </div>
       </div>
+
+      {/* Choix du moteur IA */}
+      {showAiSettings && (
+        <div style={{ marginBottom: 16, padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginBottom: 8 }}>Moteur IA</div>
+          <>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+              Fournisseur
+            </label>
+            <select
+              value={aiProvider}
+              onChange={(event) => setAiProvider(event.target.value as AIProvider)}
+              style={{ width: '100%', minHeight: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', marginBottom: 10 }}
+            >
+              {aiProviders.map((provider) => (
+                <option key={provider.id} value={provider.id}>{provider.label}</option>
+              ))}
+            </select>
+            <p style={{ margin: '0 0 12px', fontSize: 12, color: '#64748b', lineHeight: 1.5 }}>
+              {aiProviders.find((provider) => provider.id === aiProvider)?.note}
+            </p>
+
+            {aiProvider === 'openai' && (
+              <>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                  Clé API OpenAI
+                </label>
+                <input
+                  type="password"
+                  value={openAiApiKey}
+                  onChange={(event) => setOpenAiApiKey(event.target.value)}
+                  placeholder="sk-..."
+                  style={{ width: '100%', minHeight: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', marginBottom: 12 }}
+                />
+              </>
+            )}
+
+            {aiProvider === 'gemini' && (
+              <>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
+                  Clé API Gemini
+                </label>
+                <input
+                  type="password"
+                  value={geminiApiKey}
+                  onChange={(event) => setGeminiApiKey(event.target.value)}
+                  placeholder="AIza..."
+                  style={{ width: '100%', minHeight: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', marginBottom: 12 }}
+                />
+              </>
+            )}
+
+            <button onClick={saveAiSettings} style={{ width: '100%', padding: '12px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>
+              Enregistrer le moteur IA
+            </button>
+          </>
+          {aiStatus && (
+            <div style={{ marginTop: 10, fontSize: 12, color: aiStatus.includes('Veuillez') ? '#dc2626' : '#16a34a', fontWeight: 700 }}>
+              {aiStatus}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Si l'IA est en train de travailler */}
       {isAnalyzing && (
@@ -220,6 +344,31 @@ useEffect(() => {
           </div>
         </div>
       )}
+
+      <button
+        onClick={() => {
+          setShowAiSettings(true);
+          setAiStatus('');
+        }}
+        style={{
+          position: 'fixed',
+          right: 12,
+          bottom: 12,
+          minHeight: 36,
+          padding: '0 12px',
+          background: '#0f172a',
+          color: '#ffffff',
+          border: 'none',
+          borderRadius: 999,
+          fontSize: 12,
+          fontWeight: 700,
+          cursor: 'pointer',
+          boxShadow: '0 6px 16px rgba(15, 23, 42, 0.24)',
+          zIndex: 999,
+        }}
+      >
+        Settings
+      </button>
     </div>
   );
 };

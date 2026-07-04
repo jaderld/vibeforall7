@@ -81,11 +81,14 @@ async function analyzePageSilent() {
     
     // On vérifie si l'IA a échoué, mais ON NE FAIT PLUS CRASHER LE SCRIPT (pas de "throw")
     const hasAiError = chrome.runtime.lastError || !response || response.error;
+    const aiErrorMessage = chrome.runtime.lastError?.message || response?.error || '';
 
     // On prépare le paquet de données (IA + Local)
     const analysisData = { 
       // Si l'IA a planté, on met un message par défaut, sinon on met le vrai résumé
-      summary: hasAiError ? "Le résumé par IA est indisponible (Erreur de connexion ou quota)." : response.summary,
+      summary: hasAiError
+        ? `Le résumé par IA est indisponible (${aiErrorMessage || 'Erreur de connexion ou quota'}).`
+        : response.summary,
       steps: hasAiError ? ["Suivez les instructions affichées sur la page."] : (response.steps || []),
       
       // La partie locale (contacts et glossaire) fonctionnera TOUJOURS
