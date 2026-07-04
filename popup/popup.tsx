@@ -36,6 +36,8 @@ const PROFILE_STORAGE_KEYS = {
   settingsDone: 'failcProfileSettingsDone',
 } as const;
 
+const getAnalysisStorageKey = (url: string) => `failc:${url}`;
+
 const Popup = () => {
   const [activeProfile, setActiveProfile] = useState<Profile>('standard');
   const [aiProvider, setAiProvider] = useState<AIProvider>('openai');
@@ -47,21 +49,27 @@ const Popup = () => {
   const [showSettingsChooser, setShowSettingsChooser] = useState<boolean>(false);
   const [profileStatus, setProfileStatus] = useState<string>('');
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
+  const [analysisError, setAnalysisError] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [hasModifiedPage, setHasModifiedPage] = useState<boolean>(false);
 
 useEffect(() => {
     // 1. Écoute des messages venant du content-script
     const messageListener = (message: any) => {
-      if (message.type === 'ANALYSIS_STARTED') setIsAnalyzing(true);
+      if (message.type === 'ANALYSIS_STARTED') {
+        setIsAnalyzing(true);
+        setAnalysisError('');
+      }
       if (message.type === 'ANALYSIS_ERROR') {
         setIsAnalyzing(false);
+        setAnalysisError(message.error || 'Une erreur est survenue pendant l’analyse.');
       }
       if (message.type === 'ANALYSIS_COMPLETE') {
         setIsAnalyzing(false);
         // 🔴 CORRECTION : On met à jour l'affichage immédiatement avec les données reçues
         if (message.data) {
           setAnalysis(message.data);
+          setAnalysisError('');
         }
       }
     };
@@ -96,21 +104,17 @@ useEffect(() => {
       },
     );
 
-    // 3. Lancement automatique de l'analyse
+    // 3. Chargement du cache d'analyse de la page courante
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tabUrl = tabs[0]?.url || '';
-      const tabId = tabs[0]?.id;
-      if (!tabUrl || !tabId) return;
+      if (!tabUrl) return;
 
-      // On nettoie l'URL côté sidebar aussi
       const cleanUrl = tabUrl.split('#')[0];
-      const urlKey = `failc:${cleanUrl}`;
-      
+      const urlKey = getAnalysisStorageKey(cleanUrl);
+
       chrome.storage.local.get([urlKey], (result) => {
         if (result[urlKey]) {
           setAnalysis(result[urlKey] as AnalysisData);
-        } else if (!tabUrl.startsWith('chrome://')) {
-          chrome.tabs.sendMessage(tabId, { type: 'ANALYZE_PAGE' }).catch(() => {});
         }
       });
     });
@@ -123,11 +127,12 @@ useEffect(() => {
   // Déclencheur manuel (au cas où l'automatique échoue)
   const analyzePageManually = () => {
     setIsAnalyzing(true);
+    setAnalysisError('');
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
         chrome.tabs.sendMessage(tabs[0].id, { type: 'ANALYZE_PAGE' }).catch(() => {
           setIsAnalyzing(false);
-          alert("Veuillez actualiser la page web (F5) pour que l'extension puisse se connecter.");
+          setAnalysisError("Veuillez actualiser la page web (F5) pour que l'extension puisse se connecter.");
         });
       }
     });
@@ -142,10 +147,18 @@ useEffect(() => {
   };
 
   const saveProfileSettings = () => {
-    chrome.storage.local.set({ [PROFILE_STORAGE_KEYS.settingsDone]: true }, () => {
-      setShowProfileSettings(false);
-      setProfileStatus('Profil d\'affichage enregistré.');
-      window.setTimeout(() => setProfileStatus(''), 2500);
+    chrome.storage.local.get([PROFILE_STORAGE_KEYS.settingsDone], (result) => {
+      const wasFirstChoice = !Boolean(result[PROFILE_STORAGE_KEYS.settingsDone]);
+
+      chrome.storage.local.set({ [PROFILE_STORAGE_KEYS.settingsDone]: true }, () => {
+        setShowProfileSettings(false);
+        setProfileStatus('Profil d\'affichage enregistré.');
+        window.setTimeout(() => setProfileStatus(''), 2500);
+
+        if (wasFirstChoice) {
+          analyzePageManually();
+        }
+      });
     });
   };
 
@@ -365,13 +378,34 @@ useEffect(() => {
         </div>
       )}
 
+      <button
+        onClick={analyzePageManually}
+        aria-label="Relancer l'analyse de la page"
+        title="Relancer l'analyse"
+        style={{
+          position: 'fixed',
+          left: 12,
+          top: 12,
+          width: 40,
+          height: 40,
+          borderRadius: 999,
+          border: 'none',
+          background: '#0b5fff',
+          color: '#ffffff',
+          fontSize: 18,
+          fontWeight: 800,
+          cursor: 'pointer',
+          boxShadow: '0 6px 16px rgba(15, 23, 42, 0.24)',
+          zIndex: 1000,
+        }}
+      >
+        ↻
+      </button>
+
       {/* Si l'analyse est absente (ex: erreur auto) */}
       {!isAnalyzing && !analysis && (
         <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-          <p style={{ margin: '0 0 12px', fontSize: 14, color: '#475569', lineHeight: 1.4 }}>Aucune analyse disponible pour cette page.</p>
-          <button onClick={analyzePageManually} style={{ width: '100%', padding: '12px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>
-            Lancer l'analyse IA
-          </button>
+          <p style={{ margin: 0, fontSize: 14, color: '#475569', lineHeight: 1.4 }}>Aucune analyse disponible pour cette page.</p>
         </div>
       )}
 
