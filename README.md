@@ -18,6 +18,7 @@ It helps people understand administrative web pages by making content simpler an
   - Anti-epilepsy
 - Adds a right-click action to simplify any selected text.
 - Includes a popup assistant where users can trigger analysis and ask contextual questions.
+- Lets users switch between OpenAI and Gemini from the popup and store the matching API key.
 
 ## Architecture
 
@@ -25,6 +26,12 @@ It helps people understand administrative web pages by making content simpler an
 - `popup/`: React popup interface (profiles, summary, contacts, quick Q&A).
 - `background/`: context menu registration and message forwarding.
 - `server.js`: local analysis API (fallback-friendly mock AI backend) on `http://127.0.0.1:8787`.
+
+## AI provider setup
+
+- Open the popup and choose either OpenAI or Gemini in the new AI section.
+- Paste the matching API key for the provider you selected.
+- The background worker will use the saved provider for page analysis and contextual replies.
 
 ## Run locally
 

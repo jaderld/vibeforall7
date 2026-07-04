@@ -1,3 +1,5 @@
+import { extractPageContent } from './webExtraction';
+
 type Profile = 'standard' | 'dyslexia' | 'low-vision' | 'anti-epilepsy';
 type ContactInfo = {
   contactLink?: string;
@@ -7,7 +9,6 @@ type ContactInfo = {
   adresse?: string;
   horaires?: string;
 };
-type GlossaryEntry = { term: string; definition: string };
 type StorageData = {
   contactInfo?: ContactInfo;
   [key: string]: any;
