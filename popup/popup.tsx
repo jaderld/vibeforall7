@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 
 type Profile = 'standard' | 'dyslexia' | 'low-vision' | 'anti-epilepsy';
 type AIProvider = 'openai' | 'gemini';
-type ContactInfo = { telephone: string; email: string; adresse: string; horaires: string; };
+type ContactInfo = { telephone: string; email: string; adresse: string; horaires: string; contactLink: string; contactLabel: string; };
 
 type AnalysisData = {
   summary: string;
@@ -56,6 +56,16 @@ useEffect(() => {
           setAnalysis(message.data);
         }
       }
+      if (message.type === 'CONTACT_FOUND' && message.data) {
+        setAnalysis((prev) => prev ? {
+          ...prev,
+          contactInfo: {
+            ...prev.contactInfo,
+            contactLink: message.data.url,
+            contactLabel: message.data.label,
+          },
+        } : prev);
+      }
     };
     chrome.runtime.onMessage.addListener(messageListener);
 
@@ -96,7 +106,7 @@ useEffect(() => {
       // On nettoie l'URL côté sidebar aussi
       const cleanUrl = tabUrl.split('#')[0];
       const urlKey = `failc:${cleanUrl}`;
-      
+
       chrome.storage.local.get([urlKey], (result) => {
         if (result[urlKey]) {
           setAnalysis(result[urlKey] as AnalysisData);
@@ -165,7 +175,7 @@ useEffect(() => {
 
   return (
     <div style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 72, fontFamily: 'Arial, sans-serif', background: '#f8fafc', color: '#0f172a' }}>
-      
+
       {/* En-tête */}
       <div style={{ background: 'linear-gradient(135deg, #0b5fff 0%, #2563eb 100%)', color: '#fff', padding: 16, borderRadius: 12, marginBottom: 16 }}>
         <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.9 }}>FAILC Assistant</div>
@@ -276,10 +286,10 @@ useEffect(() => {
       {/* RÉSULTATS DE L'ANALYSE */}
       {!isAnalyzing && analysis && (
         <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-          
+
           <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Résumé de la page</h3>
           <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.5, color: '#334155' }}>{analysis.summary}</p>
-          
+
           {analysis.steps && analysis.steps.length > 0 && (
             <>
               <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Étapes à suivre</h3>
@@ -290,13 +300,13 @@ useEffect(() => {
           )}
 
           {/* LE BOUTON POUR MODIFIER LA PAGE */}
-          <button 
-            onClick={triggerPageModifications} 
+          <button
+            onClick={triggerPageModifications}
             disabled={hasModifiedPage}
-            style={{ 
-              width: '100%', minHeight: 44, borderRadius: 8, border: 'none', 
-              background: hasModifiedPage ? '#22c55e' : '#f97316', 
-              color: '#fff', cursor: hasModifiedPage ? 'default' : 'pointer', 
+            style={{
+              width: '100%', minHeight: 44, borderRadius: 8, border: 'none',
+              background: hasModifiedPage ? '#22c55e' : '#f97316',
+              color: '#fff', cursor: hasModifiedPage ? 'default' : 'pointer',
               fontSize: 14, fontWeight: 700, marginBottom: 16
             }}
           >
@@ -318,7 +328,20 @@ useEffect(() => {
                 </div>
               );
             })}
-            {(!analysis.contactInfo?.telephone && !analysis.contactInfo?.email) && (
+            {analysis.contactInfo?.contactLink && (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, fontSize: 14, color: '#334155' }}>
+                <span>📩</span>
+                <a
+                  href={analysis.contactInfo.contactLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#0b5fff', fontWeight: 700, textDecoration: 'underline' }}
+                >
+                  {analysis.contactInfo.contactLabel || 'Page de contact'}
+                </a>
+              </div>
+            )}
+            {(!analysis.contactInfo?.telephone && !analysis.contactInfo?.email && !analysis.contactInfo?.contactLink) && (
               <span style={{ fontSize: 13, color: '#64748b' }}>Aucun contact détecté.</span>
             )}
           </div>

@@ -1,6 +1,17 @@
 type Profile = 'standard' | 'dyslexia' | 'low-vision' | 'anti-epilepsy';
-type ContactInfo = { telephone: string; email: string; adresse: string; horaires: string };
+type ContactInfo = {
+  contactLink?: string;
+  contactLabel?: string;
+  telephone?: string;
+  email?: string;
+  adresse?: string;
+  horaires?: string;
+};
 type GlossaryEntry = { term: string; definition: string };
+type StorageData = {
+  contactInfo?: ContactInfo;
+  [key: string]: any;
+};
 
 const STORAGE_PREFIX = 'failc:';
 const TERM_DEFINITIONS: Array<{ term: string; definition: string }> = [
@@ -13,12 +24,31 @@ const TERM_DEFINITIONS: Array<{ term: string; definition: string }> = [
   { term: 'démarche', definition: 'Action administrative à réaliser auprès d’un service public.' }
 ];
 
+// Zones techniques à ignorer (jamais de contenu visible pertinent à modifier).
+// Volontairement PAS de header/nav/footer ici : ces zones contiennent parfois des
+// boutons utiles (connexion, recharge de compte, etc.). Le tri se fait uniquement
+// par mot-clé reconnu (voir simplifyUIButton), pas par emplacement dans la page.
+const IGNORED_ZONES_SELECTOR = 'script, style, noscript, svg, iframe, textarea, input';
+
 let activeProfile: Profile = 'standard';
 let currentPopover: HTMLDivElement | null = null;
+let observer: MutationObserver | null = null;
 
 // ==========================================
 // 1. GESTION DES PROFILS (CSS)
 // ==========================================
+const SUPPORTED_SITES = [
+  'impots.gouv.fr',
+  'caf.fr',
+  'ameli.fr',
+  'ants.gouv.fr',
+  'urssaf.fr'
+];
+
+function isSupportedSite() {
+  return SUPPORTED_SITES.some(site => location.hostname.includes(site));
+}
+
 function applyProfileStyles(profile: Profile) {
   const existing = document.getElementById('failc-profile-style');
   if (existing) existing.remove();
@@ -44,7 +74,7 @@ function applyProfileStyles(profile: Profile) {
 }
 
 // ==========================================
-// 2. LECTURE & ANALYSE SILENCIEUSE (IA)
+// 2. LECTURE & ANALYSE SILENCIEUSE (IA & REGEX)
 // ==========================================
 function collectBlocks() {
   const elements = Array.from(document.querySelectorAll('p, li, td, h1, h2, h3, h4, h5, h6, label'));
@@ -53,24 +83,110 @@ function collectBlocks() {
     if (!(element instanceof HTMLElement)) return;
     if (element.closest('script, style, noscript, svg, form, button, input, textarea, select, iframe')) return;
     const text = element.innerText?.trim() || element.textContent?.trim() || '';
-    if (text.length > 12 && (element.getClientRects().length > 0 || element.tagName === 'BODY')) {
+    if (text.length > 5) {
       blocks.push({ text });
     }
   });
   return blocks.slice(0, 60);
 }
 
-function extractContactInfo(text: string): ContactInfo {
-  const email = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.exec(text)?.[0] || '';
-  const telephone = /(\+33|0)[0-9 .-]{8,14}/.exec(text)?.[0] || '';
-  return { telephone, email, adresse: '', horaires: '' };
+// Mots-clés désignant un accès au contact/support/prise de rendez-vous
+const CONTACT_KEYWORDS = [
+  'contact', 'contactez', 'nous contacter', 'nous joindre',
+  'aide', 'faq', 'support', 'assistance',
+  'rendez-vous', 'rendezvous', 'rdv', 'prendre rendez-vous'
+];
+
+// Cherche le lien/bouton de contact sur la page et renvoie son libellé + son URL
+// Cherche le premier lien/bouton de contact sur la page et renvoie son libellé + son URL
+function findContactLink(): { label: string; url: string } | null {
+  const candidates = Array.from(document.querySelectorAll('a, button'));
+
+  for (const el of candidates) {
+    if (!(el instanceof HTMLElement)) continue;
+
+    // On exclut les éléments manifestement cachés à l'écran
+    const style = window.getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+
+    const rawText =
+      el.innerText?.trim() ||
+      el.getAttribute('aria-label') ||
+      el.textContent?.trim() ||
+      '';
+
+    const text = normalize(rawText);
+    if (!text) continue;
+
+    const matched = CONTACT_KEYWORDS.some((kw) => text.includes(kw));
+    if (!matched) continue;
+
+    // On récupère le lien brut (dans le HTML) ET l'URL absolue résolue par le navigateur
+    const rawHref = el.getAttribute('href') || '';
+    const url = (el as HTMLAnchorElement).href || rawHref;
+    
+    // FILTRE 1 : On ignore directement les ancres brutes, la racine ou le JS
+    if (
+      !url || 
+      rawHref === '#' || 
+      rawHref === '/' || 
+      rawHref.startsWith('#') || 
+      rawHref.startsWith('javascript:')
+    ) {
+      continue;
+    }
+
+    // FILTRE 2 : On ignore les "tabs" (liens pointant vers la même page avec une ancre #)
+    try {
+      const parsedUrl = new URL(url, window.location.href);
+      const currentUrl = new URL(window.location.href);
+      
+      // Si l'URL a le même chemin d'accès que la page actuelle et possède un "#", on ignore
+      if (parsedUrl.pathname === currentUrl.pathname && parsedUrl.hash) {
+        continue;
+      }
+    } catch (e) {
+      // Si l'URL est mal formée, on l'ignore
+      continue;
+    }
+
+    // Si on arrive ici, c'est un vrai lien vers une AUTRE page (la vraie page de contact)
+    return { label: rawText, url };
+  }
+
+  return null;
+}
+
+// Extrait les coordonnées directement depuis le texte brut
+function extractContactInfo(text: string): Partial<ContactInfo> {
+  const info: Partial<ContactInfo> = {};
+
+  // Téléphone (ex: 01 23 45 67 89 ou +33 1...)
+  const phoneMatch = text.match(/(?:(?:\+|00)33|0)\s*[1-9](?:[\s.-]*\d{2}){4}/);
+  if (phoneMatch) info.telephone = phoneMatch[0];
+
+  // Email
+  const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  if (emailMatch) info.email = emailMatch[0];
+
+  // Horaires basiques (ex: "Du lundi au vendredi de 9h à 17h")
+  const horairesMatch = text.match(/(?:du|de)\s+(?:lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche).*?(?:à|a)\s+\d{1,2}h(?:\d{2})?/i);
+  if (horairesMatch) info.horaires = horairesMatch[0];
+
+  // Adresse (Recherche simplifiée : Numéro de rue + Code postal 5 chiffres + Ville)
+  const addressMatch = text.match(/\d{1,4}\s+[a-zA-Z0-9\s,.-]+?\s+\d{5}\s+[a-zA-Z\s-]+/);
+  if (addressMatch) info.adresse = addressMatch[0].trim();
+
+  return info;
 }
 
 async function analyzePageSilent() {
   chrome.runtime.sendMessage({ type: 'ANALYSIS_STARTED' }).catch(() => {});
   const blocks = collectBlocks();
   const visibleText = blocks.map(b => b.text).join(' ');
-  
+  const contactLink = findContactLink();
+  const extractedContact = extractContactInfo(visibleText);
+
   try {
     const response = await new Promise<any>((resolve) => {
       chrome.runtime.sendMessage({ type: 'FETCH_ANALYSIS', payload: { blocks } }, resolve);
@@ -78,22 +194,29 @@ async function analyzePageSilent() {
 
     const cleanUrl = location.href.split('#')[0];
     const storageKey = `${STORAGE_PREFIX}${cleanUrl}`;
-    
+
     // On vérifie si l'IA a échoué, mais ON NE FAIT PLUS CRASHER LE SCRIPT (pas de "throw")
     const hasAiError = chrome.runtime.lastError || !response || response.error;
     const aiErrorMessage = chrome.runtime.lastError?.message || response?.error || '';
 
     // On prépare le paquet de données (IA + Local)
-    const analysisData = { 
+    const analysisData = {
       // Si l'IA a planté, on met un message par défaut, sinon on met le vrai résumé
       summary: hasAiError
         ? `Le résumé par IA est indisponible (${aiErrorMessage || 'Erreur de connexion ou quota'}).`
         : response.summary,
       steps: hasAiError ? ["Suivez les instructions affichées sur la page."] : (response.steps || []),
-      
+
       // La partie locale (contacts et glossaire) fonctionnera TOUJOURS
-      glossary: TERM_DEFINITIONS.filter(e => visibleText.toLowerCase().includes(e.term.toLowerCase())), 
-      contactInfo: extractContactInfo(visibleText),
+      glossaire: TERM_DEFINITIONS.filter(e => visibleText.toLowerCase().includes(e.term.toLowerCase())),
+      contactInfo: {
+        contactLink: contactLink?.url || '',
+        contactLabel: contactLink?.label || '',
+        telephone: extractedContact.telephone || '',
+        email: extractedContact.email || '',
+        adresse: extractedContact.adresse || '',
+        horaires: extractedContact.horaires || ''
+      },
     };
 
     // On sauvegarde tout
@@ -109,72 +232,27 @@ async function analyzePageSilent() {
 // ==========================================
 // 3. MODIFICATION VISUELLE DE LA PAGE
 // ==========================================
-function applyVisualModifications() {
-  // 1. Simplification des termes courants dans les noeuds textuels
-  const replacements: Array<[RegExp, string]> = [
-    [/\bavis d['’]imposition\b/gi, 'document de l’administration'],
-    [/\bcomplémentaire santé\b/gi, 'mutuelle (complémentaire santé)'],
-    [/\bdocuments?\b/gi, 'pièces à fournir']
-  ];
-
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null);
-  const textNodes: Text[] = [];
-  while (walker.nextNode()) {
-    if (walker.currentNode.nodeValue?.trim() && !walker.currentNode.parentElement?.closest('script, style, noscript')) {
-      textNodes.push(walker.currentNode as Text);
-    }
-  }
-
-  textNodes.forEach((node) => {
-    let text = node.nodeValue || '';
-    let originalText = text;
-
-    // Remplacements FALC
-    replacements.forEach(([pattern, replacement]) => {
-      text = text.replace(pattern, replacement);
-    });
-
-    // Création des spans pour le glossaire
-    TERM_DEFINITIONS.forEach((entry) => {
-      const escapedTerm = entry.term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`\\b${escapedTerm}\\b`, 'gi');
-      text = text.replace(regex, (match) => `<span class="failc-term" tabindex="0" data-definition="${entry.definition}">${match}</span>`);
-    });
-
-    if (text !== originalText) {
-      const fragment = document.createRange().createContextualFragment(text);
-      node.parentNode?.replaceChild(fragment, node);
-    }
-  });
-
-  // 2. Écouteurs pour les bulles d'aide du glossaire
-  document.querySelectorAll('.failc-term').forEach((element) => {
-    element.addEventListener('mouseenter', (e) => showPopover(e.currentTarget as HTMLElement));
-    element.addEventListener('focus', (e) => showPopover(e.currentTarget as HTMLElement));
-    element.addEventListener('mouseleave', hidePopover);
-    element.addEventListener('blur', hidePopover);
-  });
-
-  // 3. Encadrer les éléments importants (champs, boutons)
-  document.querySelectorAll('button, input, select, textarea').forEach((element) => {
-    if (element instanceof HTMLElement) {
-      element.style.outline = '3px solid #f97316'; // Orange vif
-      element.style.outlineOffset = '2px';
-    }
-  });
-}
-
 function showPopover(target: HTMLElement) {
   hidePopover();
-  const definition = target.getAttribute('data-definition') || '';
+
+  const definition =
+    target.getAttribute('data-definition') ||
+    target.title ||
+    '';
+
   if (!definition) return;
+
   const popover = document.createElement('div');
   popover.className = 'failc-popover';
   popover.textContent = definition;
+
   document.body.appendChild(popover);
+
   const rect = target.getBoundingClientRect();
-  popover.style.top = `${window.scrollY + rect.bottom + 6}px`;
-  popover.style.left = `${window.scrollX + rect.left}px`;
+
+  popover.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  popover.style.left = `${rect.left + window.scrollX}px`;
+
   currentPopover = popover;
 }
 
@@ -183,10 +261,360 @@ function hidePopover() {
   currentPopover = null;
 }
 
+function normalize(text: string) {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+// Détection simple par mot-clé, peu importe ce qu'il y a autour du mot-clé dans le texte du bouton
+function simplifyUIButton(text: string): string | null {
+  const t = normalize(text);
+
+  // 🔐 CONNEXION (PRIORITÉ HAUTE)
+  if (
+    t.includes("connexion") ||
+    t.includes("se connecter") ||
+    t.includes("mon compte") ||
+    t.includes("espace") ||
+    t.includes("account")
+  ) {
+    return "CONNEXION";
+  }
+
+  // 🔍 RECHERCHE
+  if (
+    t.includes("chercher") ||
+    t.includes("rechercher") ||
+    t.includes("search")
+  ) {
+    return "RECHERCHE";
+  }
+
+  // ▶ COMMENCER
+  if (
+    t.includes("commencer") ||
+    t.includes("demarrer") ||
+    t.includes("lancer")
+  ) {
+    return "COMMENCER";
+  }
+
+  // ➡ SUIVANT
+  if (
+    t.includes("suivant") ||
+    t.includes("continuer") ||
+    t.includes("etape")
+  ) {
+    return "SUIVANT";
+  }
+
+  // ✔ CONFIRMER
+  if (
+    t.includes("valider") ||
+    t.includes("confirmer") ||
+    t.includes("envoyer")
+  ) {
+    return "CONFIRMER";
+  }
+
+  // ❌ RETOUR
+  if (
+    t.includes("retour") ||
+    t.includes("annuler")
+  ) {
+    return "RETOUR";
+  }
+
+  return null;
+}
+
+// Détection tardive : certains sites chargent leur bouton de contact après coup
+// (SPA, contenu lazy-loadé). Si on en trouve un après la première analyse, on met
+// à jour le stockage ET on notifie le sidebar en direct.
+function refreshContactLinkIfNeeded() {
+  if ((window as any).__failcContactInjected) return;
+
+  const found = findContactLink();
+  if (!found) return;
+
+  const cleanUrl = location.href.split('#')[0];
+  const storageKey = `${STORAGE_PREFIX}${cleanUrl}`;
+
+  chrome.storage.local.get([storageKey], (result) => {
+    // AJOUT DU CAST "as StorageData" ICI
+    const existing = result[storageKey] as StorageData; 
+    
+    if (!existing) return;
+
+    // S'il n'y avait pas de lien de contact enregistré, on met à jour
+    if (!existing.contactInfo || !existing.contactInfo.contactLink) {
+      existing.contactInfo = existing.contactInfo || {};
+      existing.contactInfo.contactLink = found.url;
+      existing.contactInfo.contactLabel = found.label;
+
+      chrome.storage.local.set({ [storageKey]: existing }, () => {
+        (window as any).__failcContactInjected = true;
+        // On renvoie l'analyse complète au popup pour qu'il mette à jour l'affichage
+        chrome.runtime.sendMessage({ type: 'ANALYSIS_COMPLETE', data: existing }).catch(() => {});
+      });
+    } else {
+      // Déjà traité
+      (window as any).__failcContactInjected = true;
+    }
+  });
+}
+
+function startDomObserver() {
+  if (observer) observer.disconnect();
+
+  observer = new MutationObserver(() => {
+    // debounce simple
+    clearTimeout((window as any).__failcTimeout);
+
+    (window as any).__failcTimeout = setTimeout(() => {
+      applyVisualModifications();
+      refreshContactLinkIfNeeded();
+    }, 500);
+  });
+
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true
+  });
+}
+
+// Détecte les champs de recherche via leur placeholder / aria-label / type,
+// invisibles pour le TreeWalker de texte (ce sont des attributs, pas du texte du DOM)
+function simplifySearchFields() {
+  const fields = document.querySelectorAll('input, textarea');
+
+  fields.forEach((el) => {
+    if (!(el instanceof HTMLInputElement) && !(el instanceof HTMLTextAreaElement)) return;
+
+    const placeholder = el.getAttribute('placeholder') || '';
+    const ariaLabel = el.getAttribute('aria-label') || '';
+    const type = (el as HTMLInputElement).type || '';
+
+    const combined = normalize(`${placeholder} ${ariaLabel} ${type}`);
+
+    const isSearchField =
+      combined.includes('cherch') ||
+      combined.includes('search') ||
+      type === 'search';
+
+    if (!isSearchField) return;
+
+    if (placeholder && placeholder !== 'RECHERCHE') {
+      el.setAttribute('placeholder', 'RECHERCHE');
+    }
+    if (ariaLabel && ariaLabel !== 'RECHERCHE') {
+      el.setAttribute('aria-label', 'RECHERCHE');
+    }
+    highlightElement(el);
+  });
+}
+
+// Mots-clés désignant une démarche importante à mettre en avant.
+// Contrairement à simplifyUIButton, on NE renomme PAS le texte ici (on perdrait
+// l'info précise "quelle démarche"), on se contente d'encadrer l'élément.
+const DEMARCHE_KEYWORDS = [
+  'demarche', 'attestation', 'carte vitale', 'feuille de soins',
+  'payer en ligne', 'complementaire sante', 'remboursement',
+  'toutes les demarches', 'demander', 'obtenir un', 'obtenir une'
+];
+
+function isNoteworthyDemarcheLink(text: string): boolean {
+  const t = normalize(text);
+  if (t.length < 3) return false;
+  return DEMARCHE_KEYWORDS.some((kw) => t.includes(kw));
+}
+
+// Remplace le texte visible d'un bouton/lien SANS casser une icône imbriquée
+// (ex: <a><svg/><span>Se connecter</span></a>). On cherche le premier nœud de
+// texte non vide, à quelque profondeur que ce soit, et on le remplace.
+function setVisibleLabel(el: HTMLElement, label: string) {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let firstTextNode: Text | null = null;
+  const extraTextNodes: Text[] = [];
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (!node.nodeValue?.trim()) continue;
+    if (!firstTextNode) {
+      firstTextNode = node;
+    } else {
+      extraTextNodes.push(node);
+    }
+  }
+
+  if (firstTextNode) {
+    firstTextNode.nodeValue = label;
+    extraTextNodes.forEach((node) => { node.nodeValue = ''; });
+  } else {
+    // Pas de nœud de texte trouvé (ex: icône seule) -> fallback sur le texte complet
+    el.textContent = label;
+  }
+
+  el.setAttribute('aria-label', label);
+  el.title = label;
+}
+
+// Contour bien visible, réutilisé pour boutons ET liens de démarches
+function highlightElement(el: HTMLElement) {
+  el.style.outline = '3px solid #f97316';
+  el.style.outlineOffset = '2px';
+  el.style.boxShadow = '0 0 0 5px rgba(249, 115, 22, 0.18)';
+}
+
+function applyVisualModifications() {
+  // Champs de recherche (placeholder / aria-label) — traités séparément du texte visible
+  simplifySearchFields();
+
+  // Uniquement des remplacements sûrs, ciblés sur la navigation d'une démarche
+  // (on a retiré les remplacements trop larges type "documents" / "dossier" / "justificatif"
+  // qui changeaient le sens de mots courants partout sur la page)
+  const replacements: Array<[RegExp, string]> = [
+    // 🔍 RECHERCHE
+    [/\bque cherchez[- ]vous\s*\??/gi, 'RECHERCHE'],
+    [/\brechercher\b/gi, 'RECHERCHE'],
+    [/\bsearch\b/gi, 'RECHERCHE'],
+
+    // ▶ ACTIONS PRINCIPALES
+    [/\bcommencer\b/gi, 'COMMENCER'],
+    [/\bdémarrer\b/gi, 'COMMENCER'],
+    [/\blancer\b/gi, 'COMMENCER'],
+
+    // ➡ NAVIGATION / PROGRESSION
+    [/\bétape suivante\b/gi, 'SUIVANT'],
+    [/\bsuivant(e)?\b/gi, 'SUIVANT'],
+    [/\bpoursuivre\b/gi, 'SUIVANT'],
+    [/\bcontinuer\b/gi, 'SUIVANT'],
+
+    // ✔ VALIDATION / CONFIRMATION
+    [/\bvalider\b/gi, 'CONFIRMER'],
+    [/\bconfirmer\b/gi, 'CONFIRMER'],
+    [/\benregistrer\b/gi, 'SAUVEGARDER'],
+    [/\bsoumettre\b/gi, 'ENVOYER'],
+
+    // ❌ RETOUR / ANNULATION
+    [/\bannuler\b/gi, 'RETOUR'],
+    [/\brevenir\b/gi, 'RETOUR'],
+    [/\bretour\b/gi, 'RETOUR'],
+
+    // 📄 ADMIN — termes précis uniquement, pas de mots génériques
+    [/\bavis d['’]imposition\b/gi, 'document de l’administration'],
+    [/\bcomplémentaire santé\b/gi, 'mutuelle (complémentaire santé)'],
+
+    // 🧾 IMPÔTS / CAF / ADMIN
+    [/\brevenu fiscal de référence\b/gi, 'revenu utilisé pour les aides'],
+    [/\bnuméro fiscal\b/gi, 'identifiant impôts'],
+    [/\bcaf\b/gi, 'CAF (aides familiales)'],
+    [/\burssaf\b/gi, 'URSSAF (cotisations sociales)'],
+
+    // ⚙ STATUTS
+    [/\ben cours de traitement\b/gi, 'EN COURS'],
+    [/\bvalidé\b/gi, 'ACCEPTÉ'],
+    [/\brejeté\b/gi, 'REFUSÉ'],
+    [/\bincomplet\b/gi, 'MANQUE DES DOCUMENTS'],
+
+    // 📬 ACTIONS UTILISATEUR
+    [/\bse connecter\b/gi, 'CONNEXION'],
+    [/\bconnexion\b/gi, 'CONNEXION'],
+    [/\bdéconnexion\b/gi, 'DÉCONNEXION']
+  ];
+
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+
+  const textNodes: Text[] = [];
+
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+
+    if (
+      !node.nodeValue?.trim() ||
+      node.parentElement?.closest(IGNORED_ZONES_SELECTOR + ', button')
+    ) continue;
+
+    textNodes.push(node);
+  }
+
+  textNodes.forEach((node) => {
+    let text = node.nodeValue || '';
+    let modified = text;
+
+    // 1. simplification texte simple (SAFE) — remplacements ciblés uniquement
+    replacements.forEach(([pattern, replacement]) => {
+      modified = modified.replace(pattern, replacement);
+    });
+
+    if (modified !== text) {
+      node.nodeValue = modified;
+    }
+
+    // 2. glossaire → highlight léger sans casser DOM
+    TERM_DEFINITIONS.forEach((entry) => {
+      const regex = new RegExp(`\\b${entry.term}\\b`, 'i');
+      if (regex.test(node.nodeValue || '')) {
+        const parent = node.parentElement;
+        if (!parent) return;
+
+        // éviter double processing
+        if (parent.dataset.failcProcessed === '1') return;
+        parent.dataset.failcProcessed = '1';
+
+        parent.style.background = 'rgba(255, 243, 176, 0.5)';
+        parent.style.cursor = 'help';
+        parent.title = entry.definition;
+
+        if ((parent as any).dataset.failcListeners === '1') return;
+        (parent as any).dataset.failcListeners = '1';
+
+        parent.addEventListener('mouseenter', () => showPopover(parent));
+        parent.addEventListener('mouseleave', hidePopover);
+      }
+    });
+  });
+
+  // 3. Boutons/liens : deux cas mis en avant, chacun où qu'il soit dans la page
+  // (header, nav, footer inclus) :
+  //   a) mot-clé générique d'action (connexion, recherche, suivant...) -> texte remplacé
+  //   b) lien vers une démarche importante -> encadré, texte conservé tel quel
+  document.querySelectorAll('button, a, [role="button"]').forEach((el) => {
+    if (!(el instanceof HTMLElement)) return;
+    if (el.closest(IGNORED_ZONES_SELECTOR)) return;
+
+    const text =
+      el.innerText?.trim() ||
+      el.getAttribute("aria-label") ||
+      el.textContent?.trim() ||
+      "";
+
+    const simplified = simplifyUIButton(text);
+    const isDemarche = !simplified && isNoteworthyDemarcheLink(text);
+
+    if (!simplified && !isDemarche) return;
+
+    const labelForTracking = simplified || 'DEMARCHE';
+    if (el.getAttribute('data-failc-label') === labelForTracking) return;
+    el.setAttribute('data-failc-label', labelForTracking);
+
+    if (simplified) {
+      setVisibleLabel(el, simplified);
+    }
+
+    highlightElement(el);
+  });
+}
+
 // ==========================================
 // 4. INITIALISATION & ÉCOUTE
 // ==========================================
 function init() {
+  startDomObserver();
+
+  if (!isSupportedSite()) return;
   chrome.storage.local.get(['failcProfile'], (result) => {
     activeProfile = (result.failcProfile as Profile) || 'standard';
     applyProfileStyles(activeProfile);
