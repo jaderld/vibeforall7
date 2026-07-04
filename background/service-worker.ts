@@ -1,7 +1,7 @@
 // 🔴 REMPLACEZ CECI PAR VOTRE VRAIE CLÉ OPENAI
 declare var process: any;
 
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_API_KEY = ""
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 
 // --------------------------------------------------------
