@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 
 type Profile = 'standard' | 'dyslexia' | 'low-vision' | 'anti-epilepsy';
 type AIProvider = 'openai' | 'gemini';
-type ContactInfo = { telephone: string; email: string; adresse: string; horaires: string; contactLink: string; contactLabel: string; };
+type ContactInfo = { telephone: string; email: string; adresse: string; horaires: string; contactLink?: string; contactLabel?: string; };
 
 type AnalysisData = {
   summary: string;
@@ -31,6 +31,13 @@ const AI_STORAGE_KEYS = {
   settingsDone: 'failcAiSettingsDone',
 } as const;
 
+const PROFILE_STORAGE_KEYS = {
+  profile: 'failcProfile',
+  settingsDone: 'failcProfileSettingsDone',
+} as const;
+
+const getAnalysisStorageKey = (url: string) => `failc:${url}`;
+
 const Popup = () => {
   const [activeProfile, setActiveProfile] = useState<Profile>('standard');
   const [aiProvider, setAiProvider] = useState<AIProvider>('openai');
@@ -38,40 +45,40 @@ const Popup = () => {
   const [geminiApiKey, setGeminiApiKey] = useState<string>('');
   const [aiStatus, setAiStatus] = useState<string>('');
   const [showAiSettings, setShowAiSettings] = useState<boolean>(true);
+  const [showProfileSettings, setShowProfileSettings] = useState<boolean>(true);
+  const [showSettingsChooser, setShowSettingsChooser] = useState<boolean>(false);
+  const [profileStatus, setProfileStatus] = useState<string>('');
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
+  const [analysisError, setAnalysisError] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [hasModifiedPage, setHasModifiedPage] = useState<boolean>(false);
 
 useEffect(() => {
     // 1. Écoute des messages venant du content-script
     const messageListener = (message: any) => {
-      if (message.type === 'ANALYSIS_STARTED') setIsAnalyzing(true);
+      if (message.type === 'ANALYSIS_STARTED') {
+        setIsAnalyzing(true);
+        setAnalysisError('');
+      }
       if (message.type === 'ANALYSIS_ERROR') {
         setIsAnalyzing(false);
+        setAnalysisError(message.error || 'Une erreur est survenue pendant l’analyse.');
       }
       if (message.type === 'ANALYSIS_COMPLETE') {
         setIsAnalyzing(false);
         // 🔴 CORRECTION : On met à jour l'affichage immédiatement avec les données reçues
         if (message.data) {
           setAnalysis(message.data);
+          setAnalysisError('');
         }
-      }
-      if (message.type === 'CONTACT_FOUND' && message.data) {
-        setAnalysis((prev) => prev ? {
-          ...prev,
-          contactInfo: {
-            ...prev.contactInfo,
-            contactLink: message.data.url,
-            contactLabel: message.data.label,
-          },
-        } : prev);
       }
     };
     chrome.runtime.onMessage.addListener(messageListener);
 
     // 2. Initialisation : chargement du profil
-    chrome.storage.local.get(['failcProfile'], (result) => {
-      setActiveProfile((result.failcProfile as Profile) || 'standard');
+    chrome.storage.local.get([PROFILE_STORAGE_KEYS.profile, PROFILE_STORAGE_KEYS.settingsDone], (result) => {
+      setActiveProfile((result[PROFILE_STORAGE_KEYS.profile] as Profile) || 'standard');
+      setShowProfileSettings(!Boolean(result[PROFILE_STORAGE_KEYS.settingsDone]));
     });
 
     chrome.storage.local.get(
@@ -97,21 +104,17 @@ useEffect(() => {
       },
     );
 
-    // 3. Lancement automatique de l'analyse
+    // 3. Chargement du cache d'analyse de la page courante
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tabUrl = tabs[0]?.url || '';
-      const tabId = tabs[0]?.id;
-      if (!tabUrl || !tabId) return;
+      if (!tabUrl) return;
 
-      // On nettoie l'URL côté sidebar aussi
       const cleanUrl = tabUrl.split('#')[0];
-      const urlKey = `failc:${cleanUrl}`;
+      const urlKey = getAnalysisStorageKey(cleanUrl);
 
       chrome.storage.local.get([urlKey], (result) => {
         if (result[urlKey]) {
           setAnalysis(result[urlKey] as AnalysisData);
-        } else if (!tabUrl.startsWith('chrome://')) {
-          chrome.tabs.sendMessage(tabId, { type: 'ANALYZE_PAGE' }).catch(() => {});
         }
       });
     });
@@ -124,11 +127,12 @@ useEffect(() => {
   // Déclencheur manuel (au cas où l'automatique échoue)
   const analyzePageManually = () => {
     setIsAnalyzing(true);
+    setAnalysisError('');
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
         chrome.tabs.sendMessage(tabs[0].id, { type: 'ANALYZE_PAGE' }).catch(() => {
           setIsAnalyzing(false);
-          alert("Veuillez actualiser la page web (F5) pour que l'extension puisse se connecter.");
+          setAnalysisError("Veuillez actualiser la page web (F5) pour que l'extension puisse se connecter.");
         });
       }
     });
@@ -136,9 +140,25 @@ useEffect(() => {
 
   const applyProfile = (profile: Profile) => {
     setActiveProfile(profile);
-    chrome.storage.local.set({ failcProfile: profile });
+    chrome.storage.local.set({ [PROFILE_STORAGE_KEYS.profile]: profile });
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) chrome.tabs.sendMessage(tabs[0].id, { type: 'SET_PROFILE', profile }).catch(() => {});
+    });
+  };
+
+  const saveProfileSettings = () => {
+    chrome.storage.local.get([PROFILE_STORAGE_KEYS.settingsDone], (result) => {
+      const wasFirstChoice = !Boolean(result[PROFILE_STORAGE_KEYS.settingsDone]);
+
+      chrome.storage.local.set({ [PROFILE_STORAGE_KEYS.settingsDone]: true }, () => {
+        setShowProfileSettings(false);
+        setProfileStatus('Profil d\'affichage enregistré.');
+        window.setTimeout(() => setProfileStatus(''), 2500);
+
+        if (wasFirstChoice) {
+          analyzePageManually();
+        }
+      });
     });
   };
 
@@ -152,14 +172,28 @@ useEffect(() => {
 
     chrome.storage.local.set({
       [AI_STORAGE_KEYS.provider]: aiProvider,
-      [AI_STORAGE_KEYS.openaiKey]: openAiApiKey.trim(),
-      [AI_STORAGE_KEYS.geminiKey]: geminiApiKey.trim(),
+      [AI_STORAGE_KEYS.openaiKey]: aiProvider === 'openai' ? openAiApiKey.trim() : '',
+      [AI_STORAGE_KEYS.geminiKey]: aiProvider === 'gemini' ? geminiApiKey.trim() : '',
       [AI_STORAGE_KEYS.settingsDone]: true,
     }, () => {
       setAiStatus('Paramètres IA enregistrés.');
       setShowAiSettings(false);
       window.setTimeout(() => setAiStatus(''), 2500);
     });
+  };
+
+  const openProfileSettingsFromChooser = () => {
+    setShowProfileSettings(true);
+    setShowAiSettings(false);
+    setShowSettingsChooser(false);
+    setAiStatus('');
+  };
+
+  const openAiSettingsFromChooser = () => {
+    setShowAiSettings(true);
+    setShowProfileSettings(false);
+    setShowSettingsChooser(false);
+    setProfileStatus('');
   };
 
   const triggerPageModifications = () => {
@@ -175,7 +209,7 @@ useEffect(() => {
 
   return (
     <div style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 72, fontFamily: 'Arial, sans-serif', background: '#f8fafc', color: '#0f172a' }}>
-
+      
       {/* En-tête */}
       <div style={{ background: 'linear-gradient(135deg, #0b5fff 0%, #2563eb 100%)', color: '#fff', padding: 16, borderRadius: 12, marginBottom: 16 }}>
         <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.9 }}>FAILC Assistant</div>
@@ -183,25 +217,40 @@ useEffect(() => {
       </div>
 
       {/* Profils d'affichage */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginBottom: 8 }}>Profils d'affichage (Visuel)</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {profiles.map((profile) => (
-            <button
-              key={profile.id}
-              onClick={() => applyProfile(profile.id)}
-              style={{
-                minHeight: 40, border: activeProfile === profile.id ? '2px solid #0b5fff' : '1px solid #cbd5e1',
-                borderRadius: 8, background: activeProfile === profile.id ? '#eff6ff' : '#ffffff',
-                color: activeProfile === profile.id ? '#0b5fff' : '#475569', cursor: 'pointer',
-                fontSize: 13, fontWeight: activeProfile === profile.id ? 700 : 500
-              }}
-            >
-              {profile.label}
-            </button>
-          ))}
+      {showProfileSettings && (
+        <div style={{ marginBottom: 16, padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginBottom: 8 }}>Profils d'affichage (Visuel)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {profiles.map((profile) => (
+              <button
+                key={profile.id}
+                onClick={() => applyProfile(profile.id)}
+                style={{
+                  minHeight: 40, border: activeProfile === profile.id ? '2px solid #0b5fff' : '1px solid #cbd5e1',
+                  borderRadius: 8, background: activeProfile === profile.id ? '#eff6ff' : '#ffffff',
+                  color: activeProfile === profile.id ? '#0b5fff' : '#475569', cursor: 'pointer',
+                  fontSize: 13, fontWeight: activeProfile === profile.id ? 700 : 500
+                }}
+              >
+                {profile.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={saveProfileSettings}
+            style={{ width: '100%', padding: '12px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', marginTop: 12 }}
+          >
+            Valider ce profil
+          </button>
+
+          {profileStatus && (
+            <div style={{ marginTop: 10, fontSize: 12, color: '#16a34a', fontWeight: 700 }}>
+              {profileStatus}
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Choix du moteur IA */}
       {showAiSettings && (
@@ -266,6 +315,62 @@ useEffect(() => {
         </div>
       )}
 
+      {showSettingsChooser && (
+        <div
+          style={{
+            position: 'fixed',
+            right: 12,
+            bottom: 56,
+            width: 230,
+            background: '#ffffff',
+            borderRadius: 12,
+            border: '1px solid #e2e8f0',
+            boxShadow: '0 14px 30px rgba(15, 23, 42, 0.22)',
+            padding: 10,
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              right: 20,
+              bottom: -8,
+              width: 14,
+              height: 14,
+              background: '#ffffff',
+              borderRight: '1px solid #e2e8f0',
+              borderBottom: '1px solid #e2e8f0',
+              transform: 'rotate(45deg)',
+            }}
+          />
+
+          <div style={{ fontSize: 12, fontWeight: 800, color: '#334155', marginBottom: 8 }}>
+            Ouvrir les settings
+          </div>
+
+          <button
+            onClick={openProfileSettingsFromChooser}
+            style={{ width: '100%', padding: '9px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', marginBottom: 6, fontSize: 12 }}
+          >
+            Profil d'affichage
+          </button>
+
+          <button
+            onClick={openAiSettingsFromChooser}
+            style={{ width: '100%', padding: '9px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', marginBottom: 6, fontSize: 12 }}
+          >
+            Moteur IA
+          </button>
+
+          <button
+            onClick={() => setShowSettingsChooser(false)}
+            style={{ width: '100%', padding: '8px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 12 }}
+          >
+            Fermer
+          </button>
+        </div>
+      )}
+
       {/* Si l'IA est en train de travailler */}
       {isAnalyzing && (
         <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', textAlign: 'center', marginBottom: 16 }}>
@@ -273,23 +378,44 @@ useEffect(() => {
         </div>
       )}
 
+      <button
+        onClick={analyzePageManually}
+        aria-label="Relancer l'analyse de la page"
+        title="Relancer l'analyse"
+        style={{
+          position: 'fixed',
+          left: 12,
+          top: 12,
+          width: 40,
+          height: 40,
+          borderRadius: 999,
+          border: 'none',
+          background: '#0b5fff',
+          color: '#ffffff',
+          fontSize: 18,
+          fontWeight: 800,
+          cursor: 'pointer',
+          boxShadow: '0 6px 16px rgba(15, 23, 42, 0.24)',
+          zIndex: 1000,
+        }}
+      >
+        ↻
+      </button>
+
       {/* Si l'analyse est absente (ex: erreur auto) */}
       {!isAnalyzing && !analysis && (
         <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-          <p style={{ margin: '0 0 12px', fontSize: 14, color: '#475569', lineHeight: 1.4 }}>Aucune analyse disponible pour cette page.</p>
-          <button onClick={analyzePageManually} style={{ width: '100%', padding: '12px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>
-            Lancer l'analyse IA
-          </button>
+          <p style={{ margin: 0, fontSize: 14, color: '#475569', lineHeight: 1.4 }}>Aucune analyse disponible pour cette page.</p>
         </div>
       )}
 
       {/* RÉSULTATS DE L'ANALYSE */}
       {!isAnalyzing && analysis && (
         <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-
+          
           <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Résumé de la page</h3>
           <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.5, color: '#334155' }}>{analysis.summary}</p>
-
+          
           {analysis.steps && analysis.steps.length > 0 && (
             <>
               <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Étapes à suivre</h3>
@@ -300,13 +426,13 @@ useEffect(() => {
           )}
 
           {/* LE BOUTON POUR MODIFIER LA PAGE */}
-          <button
-            onClick={triggerPageModifications}
+          <button 
+            onClick={triggerPageModifications} 
             disabled={hasModifiedPage}
-            style={{
-              width: '100%', minHeight: 44, borderRadius: 8, border: 'none',
-              background: hasModifiedPage ? '#22c55e' : '#f97316',
-              color: '#fff', cursor: hasModifiedPage ? 'default' : 'pointer',
+            style={{ 
+              width: '100%', minHeight: 44, borderRadius: 8, border: 'none', 
+              background: hasModifiedPage ? '#22c55e' : '#f97316', 
+              color: '#fff', cursor: hasModifiedPage ? 'default' : 'pointer', 
               fontSize: 14, fontWeight: 700, marginBottom: 16
             }}
           >
@@ -328,20 +454,7 @@ useEffect(() => {
                 </div>
               );
             })}
-            {analysis.contactInfo?.contactLink && (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, fontSize: 14, color: '#334155' }}>
-                <span>📩</span>
-                <a
-                  href={analysis.contactInfo.contactLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#0b5fff', fontWeight: 700, textDecoration: 'underline' }}
-                >
-                  {analysis.contactInfo.contactLabel || 'Page de contact'}
-                </a>
-              </div>
-            )}
-            {(!analysis.contactInfo?.telephone && !analysis.contactInfo?.email && !analysis.contactInfo?.contactLink) && (
+            {(!analysis.contactInfo?.telephone && !analysis.contactInfo?.email) && (
               <span style={{ fontSize: 13, color: '#64748b' }}>Aucun contact détecté.</span>
             )}
           </div>
@@ -370,8 +483,7 @@ useEffect(() => {
 
       <button
         onClick={() => {
-          setShowAiSettings(true);
-          setAiStatus('');
+          setShowSettingsChooser(true);
         }}
         style={{
           position: 'fixed',
