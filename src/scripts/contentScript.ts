@@ -16,7 +16,7 @@ type StorageData = {
 };
 
 const STORAGE_PREFIX = 'failc:';
-const TERM_DEFINITIONS: Array<{ term: string; definition: string }> = [
+const TERM_DEFINITIONS: GlossaryEntry[] = [
   { term: 'avis d\'imposition', definition: 'Document envoyé par l’administration pour expliquer le montant de votre impôt.' },
   { term: 'cotisation', definition: 'Montant payé pour financer un service ou une assurance.' },
   { term: 'complémentaire santé', definition: 'Garantie qui complète la couverture de base pour les soins médicaux.' },
@@ -92,7 +92,9 @@ function collectBlocks() {
   return blocks.slice(0, 60);
 }
 
-// Mots-clés désignant un accès au contact/support/prise de rendez-vous
+// Mots-clés désignant un accès au contact/support/prise de rendez-vous.
+// On priorise les mots-clés "forts" (sans ambiguïté) avant les mots-clés "faibles"
+// (aide/FAQ/support peuvent aussi désigner autre chose qu'un contact direct).
 const STRONG_CONTACT_KEYWORDS = [
   'contact', 'contactez', 'nous contacter', 'nous joindre',
   'rendez-vous', 'rendezvous', 'rdv', 'prendre rendez-vous'
@@ -101,16 +103,17 @@ const STRONG_CONTACT_KEYWORDS = [
 const WEAK_CONTACT_KEYWORDS = [
   'aide', 'faq', 'support', 'assistance'
 ];
-// Cherche le lien/bouton de contact sur la page et renvoie son libellé + son URL
-function findContactLink(): { label: string; url: string } | null {
-  const candidates = Array.from(document.querySelectorAll('a, button'));
 
-  // 1. L'unique changement est ici : on ajoute le type de retour ": { label: string; url: string } | null"
+// Cherche le lien/bouton de contact sur la page et renvoie son libellé + son URL.
+// On cherche d'abord avec les mots-clés forts, puis on retombe sur les faibles.
+function findContactLink(): { label: string; url: string } | null {
+  const candidates = Array.from(document.querySelectorAll('a, button, [role="button"]'));
+
   const searchWithKeywords = (keywords: string[]): { label: string; url: string } | null => {
     for (const el of candidates) {
       if (!(el instanceof HTMLElement)) continue;
 
-      // On exclut les éléments manifestement cachés à l'écran (TA LOGIQUE ORIGINALE)
+      // On exclut les éléments manifestement cachés à l'écran
       const style = window.getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
 
@@ -121,52 +124,56 @@ function findContactLink(): { label: string; url: string } | null {
         '';
 
       const text = normalize(rawText);
-      if (!text) continue;
-
-      // FILTRE ANTI-FAUX POSITIFS : Un bouton de contact est généralement court.
-      if (text.length > 60) continue;
+      if (!text || text.length > 60) continue;
 
       const matched = keywords.some((kw) => text.includes(kw));
       if (!matched) continue;
 
-      // On récupère le lien brut et l'URL absolue
+      // On récupère le lien brut (dans le HTML) ET l'URL absolue résolue par le navigateur
       const rawHref = el.getAttribute('href') || '';
       const url = (el as HTMLAnchorElement).href || rawHref;
-      
-      // FILTRE 1 : On ignore les ancres brutes, la racine ou le JS (TA LOGIQUE ORIGINALE STRICTE)
-      if (
-        !url || 
-        rawHref === '#' || 
-        rawHref === '/' || 
-        rawHref.startsWith('#') || 
-        rawHref.startsWith('javascript:')
-      ) {
-        continue;
-      }
 
-      // FILTRE 2 : On ignore les liens pointant vers la même page avec une ancre (TA LOGIQUE ORIGINALE)
-      try {
-        const parsedUrl = new URL(url, window.location.href);
-        const currentUrl = new URL(window.location.href);
-        
-        if (parsedUrl.pathname === currentUrl.pathname && parsedUrl.hash) {
+      // Les <button>/[role="button"] n'ont pas forcément de href exploitable
+      // (souvent pilotés par du JS) : on ne leur applique pas les mêmes filtres
+      // qu'à un vrai lien <a>.
+      const isButton = el.tagName.toLowerCase() === 'button' || el.getAttribute('role') === 'button';
+
+      if (!isButton) {
+        // FILTRE 1 : On ignore directement les ancres brutes, la racine ou le JS
+        if (
+          !url ||
+          rawHref === '#' ||
+          rawHref === '/' ||
+          rawHref.startsWith('#') ||
+          rawHref.startsWith('javascript:')
+        ) {
           continue;
         }
-      } catch (e) {
-        continue;
+
+        // FILTRE 2 : On ignore les "tabs" (liens pointant vers la même page avec une ancre #)
+        try {
+          const parsedUrl = new URL(url, window.location.href);
+          const currentUrl = new URL(window.location.href);
+
+          // Si l'URL a le même chemin d'accès que la page actuelle et possède un "#", on ignore
+          if (parsedUrl.pathname === currentUrl.pathname && parsedUrl.hash) {
+            continue;
+          }
+        } catch (e) {
+          // Si l'URL est mal formée, on l'ignore
+          continue;
+        }
       }
 
-      return { label: rawText, url };
+      // Si on arrive ici, c'est un vrai lien vers une AUTRE page (ou un bouton exploitable)
+      return { label: rawText, url: url || '#' };
     }
     return null;
   };
 
-  // 1. On cherche d'abord les VRAIS boutons de contact (Priorité absolue)
-  // (Le typage de searchWithKeywords au-dessus permet à TypeScript de comprendre strongMatch)
   const strongMatch = searchWithKeywords(STRONG_CONTACT_KEYWORDS);
   if (strongMatch) return strongMatch;
 
-  // 2. Si aucun bouton "Contact" n'est trouvé, on se rabat sur "Aide", "FAQ", etc.
   return searchWithKeywords(WEAK_CONTACT_KEYWORDS);
 }
 
@@ -356,9 +363,8 @@ function refreshContactLinkIfNeeded() {
   const storageKey = `${STORAGE_PREFIX}${cleanUrl}`;
 
   chrome.storage.local.get([storageKey], (result) => {
-    // AJOUT DU CAST "as StorageData" ICI
-    const existing = result[storageKey] as StorageData; 
-    
+    const existing = result[storageKey] as StorageData;
+
     if (!existing) return;
 
     // S'il n'y avait pas de lien de contact enregistré, on met à jour
@@ -379,6 +385,9 @@ function refreshContactLinkIfNeeded() {
   });
 }
 
+// La simplification visuelle et la détection de contact s'appliquent automatiquement
+// dès le chargement de la page (voir init()), puis sont réappliquées à chaque
+// changement notable du DOM (SPA, contenu lazy-loadé) — pas besoin de bouton manuel.
 function startDomObserver() {
   if (observer) observer.disconnect();
 
@@ -484,8 +493,12 @@ function highlightElement(el: HTMLElement) {
 function applyVisualModifications() {
   // Champs de recherche (placeholder / aria-label) — traités séparément du texte visible
   simplifySearchFields();
+
   type ReplacerFunc = (substring: string, ...args: any[]) => string;
 
+  // Uniquement des remplacements sûrs, ciblés sur la navigation d'une démarche
+  // (on a retiré les remplacements trop larges type "documents" / "dossier" / "justificatif"
+  // qui changeaient le sens de mots courants partout sur la page)
   const replacements: Array<[RegExp, string | ReplacerFunc]> = [
     // 👤 PROFILS DYNAMIQUES ("Vous êtes un(e) X" -> "X")
     [/\bvous êtes un(?:e)?\s+([a-zà-ÿ]+)\b/gi, (match, mot) => mot.toUpperCase()],
@@ -560,7 +573,8 @@ function applyVisualModifications() {
 
     // 1. simplification texte simple (SAFE) — remplacements ciblés uniquement
     replacements.forEach(([pattern, replacement]) => {
-      // Le 'as any' fait taire TypeScript sur l'overload, tout en fonctionnant parfaitement en JS
+      // Le "as any" fait taire TypeScript sur l'overload string | ReplacerFunc,
+      // tout en fonctionnant parfaitement en JS pour les deux cas.
       modified = modified.replace(pattern, replacement as any);
     });
 
@@ -631,7 +645,9 @@ function init() {
 
   if (!isSupportedSite()) return;
 
-  // Apply simplification immediately so users don't need to click in the popup.
+  // Application immédiate de la simplification et de la détection de contact,
+  // pour que la page soit adaptée sans que l'utilisateur ait besoin de cliquer
+  // sur un bouton dans le popup.
   applyVisualModifications();
   refreshContactLinkIfNeeded();
 
@@ -654,8 +670,12 @@ function init() {
       void analyzePageSilent();
     }
     if (message.type === 'MODIFY_PAGE') {
+      // Conservé pour compatibilité (ex: relance manuelle depuis un autre appelant) :
+      // ré-applique la simplification et la détection de contact à la demande.
       applyVisualModifications();
+      refreshContactLinkIfNeeded();
     }
+    return false;
   });
 }
 

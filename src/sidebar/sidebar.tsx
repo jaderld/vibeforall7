@@ -52,7 +52,7 @@ const Popup = () => {
   const [analysisError, setAnalysisError] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
 
-useEffect(() => {
+  useEffect(() => {
     // 1. Écoute des messages venant du content-script
     const messageListener = (message: any) => {
       if (message.type === 'ANALYSIS_STARTED') {
@@ -65,7 +65,7 @@ useEffect(() => {
       }
       if (message.type === 'ANALYSIS_COMPLETE') {
         setIsAnalyzing(false);
-        // 🔴 CORRECTION : On met à jour l'affichage immédiatement avec les données reçues
+        // On met à jour l'affichage immédiatement avec les données reçues
         if (message.data) {
           setAnalysis(message.data);
           setAnalysisError('');
@@ -200,7 +200,7 @@ useEffect(() => {
 
   return (
     <div style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 72, fontFamily: 'Arial, sans-serif', background: '#f8fafc', color: '#0f172a' }}>
-      
+
       {/* En-tête */}
       <div style={{ background: 'linear-gradient(135deg, #0b5fff 0%, #2563eb 100%)', color: '#fff', padding: 16, borderRadius: 12, marginBottom: 16 }}>
         <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.9 }}>FAILC Assistant</div>
@@ -406,13 +406,9 @@ useEffect(() => {
       {!isAnalyzing && analysis && (
         <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
 
-          <div style={{ margin: '0 0 12px', fontSize: 12, color: '#16a34a', fontWeight: 700 }}>
-            Simplification visuelle active automatiquement.
-          </div>
-          
           <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Résumé de la page</h3>
           <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.5, color: '#334155' }}>{analysis.summary}</p>
-          
+
           {analysis.steps && analysis.steps.length > 0 && (
             <>
               <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Étapes à suivre</h3>
@@ -422,7 +418,7 @@ useEffect(() => {
             </>
           )}
 
-          {/* COORDONNÉES ET CONTACTS */}
+          {/* COORDONNÉES ET CONTACTS (strong/weak keywords gérés côté content-script) */}
           <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
             <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Coordonnées trouvées</h3>
             {[
