@@ -38,6 +38,40 @@ const PROFILE_STORAGE_KEYS = {
 
 const getAnalysisStorageKey = (url: string) => `failc:${url}`;
 
+type ChatMessage = { role: 'user' | 'assistant'; content: string; ts: number };
+const getChatStorageKey = (url: string) => `failc:chat:${url}`;
+
+// -----------------------------------------------------------------------
+// Design tokens — palette sobre à contraste maîtrisé, pensée pour des
+// utilisateurs avec troubles visuels (basse vision) et cognitifs
+// (charge visuelle réduite, pas de dégradés ni de couleurs saturées,
+// aucun élément clignotant). Contrastes texte/fond ≥ 4.5:1.
+// -----------------------------------------------------------------------
+const tokens = {
+  bg: '#F5F6F8',            // fond général, gris très doux (pas de blanc pur = moins d'éblouissement)
+  surface: '#FFFFFF',
+  border: '#DADFE6',
+  borderStrong: '#B9C2CD',
+  textPrimary: '#1F2A37',   // quasi-noir bleuté, plus doux qu'un noir pur
+  textSecondary: '#5B6675',
+  accent: '#2F5D8A',        // bleu sourd, contraste ~6.8:1 sur blanc
+  accentHover: '#264B70',
+  accentSoftBg: '#E8EFF6',
+  accentSoftBorder: '#C7D6E6',
+  neutralDark: '#33404F',   // remplace le noir dur des boutons secondaires
+  success: '#2E7D4F',
+  successBg: '#E7F3EC',
+  error: '#B3411F',
+  errorBg: '#FBEAE4',
+  radius: 10,
+  fontFamily:
+    '"Atkinson Hyperlegible", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+};
+
+const focusRing: React.CSSProperties = {
+  outlineOffset: 2,
+};
+
 const Popup = () => {
   const [activeProfile, setActiveProfile] = useState<Profile>('standard');
   const [aiProvider, setAiProvider] = useState<AIProvider>('openai');
@@ -52,6 +86,16 @@ const Popup = () => {
   const [analysisError, setAnalysisError] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
 
+  // --- Chatbot (questions sur la page / les démarches, réponses via Gemini) ---
+  const [currentUrl, setCurrentUrl] = useState<string>('');
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState<string>('');
+  const [isChatSending, setIsChatSending] = useState<boolean>(false);
+  const [chatError, setChatError] = useState<string>('');
+  const [isListening, setIsListening] = useState<boolean>(false);
+  const recognitionRef = React.useRef<any>(null);
+  const chatEndRef = React.useRef<HTMLDivElement | null>(null);
+
   useEffect(() => {
     // 1. Écoute des messages venant du content-script
     const messageListener = (message: any) => {
@@ -65,16 +109,24 @@ const Popup = () => {
       }
       if (message.type === 'ANALYSIS_COMPLETE') {
         setIsAnalyzing(false);
-        // On met à jour l'affichage immédiatement avec les données reçues
         if (message.data) {
           setAnalysis(message.data);
           setAnalysisError('');
         }
       }
+      // Réponse du chatbot (posée via CHAT_ASK, traitée côté background.ts)
+      if (message.type === 'CHAT_ANSWER') {
+        setIsChatSending(false);
+        setChatError('');
+        setChatMessages((prev) => [...prev, { role: 'assistant' as const, content: message.answer as string, ts: Date.now() }]);
+      }
+      if (message.type === 'CHAT_ERROR') {
+        setIsChatSending(false);
+        setChatError(message.error || "La question n'a pas pu être envoyée.");
+      }
     };
     chrome.runtime.onMessage.addListener(messageListener);
 
-    // 2. Initialisation : chargement du profil
     chrome.storage.local.get([PROFILE_STORAGE_KEYS.profile, PROFILE_STORAGE_KEYS.settingsDone], (result) => {
       setActiveProfile((result[PROFILE_STORAGE_KEYS.profile] as Profile) || 'standard');
       setShowProfileSettings(!Boolean(result[PROFILE_STORAGE_KEYS.settingsDone]));
@@ -103,7 +155,6 @@ const Popup = () => {
       },
     );
 
-    // 3. Chargement du cache d'analyse de la page courante
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tabUrl = tabs[0]?.url || '';
       if (!tabUrl) return;
@@ -123,7 +174,6 @@ const Popup = () => {
     };
   }, []);
 
-  // Déclencheur manuel (au cas où l'automatique échoue)
   const analyzePageManually = () => {
     if (isAnalyzing) {
       return;
@@ -191,45 +241,144 @@ const Popup = () => {
   };
 
   return (
-    <div style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 72, fontFamily: 'Arial, sans-serif', background: '#f8fafc', color: '#0f172a' }}>
+    <div
+      style={{
+        width: '100%',
+        minHeight: '100vh',
+        padding: 18,
+        paddingBottom: 76,
+        fontFamily: tokens.fontFamily,
+        fontSize: 15,
+        lineHeight: 1.55,
+        background: tokens.bg,
+        color: tokens.textPrimary,
+      }}
+    >
+      {/* En-tête — couleur pleine et sobre, plus de dégradé */}
+      <div
+        style={{
+          background: tokens.accent,
+          color: '#FFFFFF',
+          padding: '14px 16px',
+          borderRadius: tokens.radius,
+          marginBottom: 16,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', opacity: 0.92 }}>
+            FAILC ASSISTANT
+          </div>
+          <div style={{ fontSize: 21, fontWeight: 700, marginTop: 4 }}>Accessibilité Web</div>
+        </div>
 
-      {/* En-tête */}
-      <div style={{ background: 'linear-gradient(135deg, #0b5fff 0%, #2563eb 100%)', color: '#fff', padding: 16, borderRadius: 12, marginBottom: 16 }}>
-        <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.9 }}>FAILC Assistant</div>
-        <div style={{ fontSize: 22, fontWeight: 800, marginTop: 4 }}>Accessibilité Web</div>
+        {/* Bouton de relance — placé à côté du titre, jamais par-dessus */}
+        <button
+          onClick={analyzePageManually}
+          disabled={isAnalyzing}
+          aria-label="Relancer l'analyse de la page"
+          title="Relancer l'analyse"
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            height: 38,
+            padding: '0 12px',
+            borderRadius: 999,
+            border: '1px solid rgba(255, 255, 255, 0.55)',
+            background: isAnalyzing ? 'rgba(255, 255, 255, 0.18)' : 'rgba(255, 255, 255, 0.14)',
+            color: '#ffffff',
+            fontSize: 12.5,
+            fontWeight: 700,
+            fontFamily: 'inherit',
+            cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+          }}
+        >
+          <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>↻</span>
+          Relancer
+        </button>
       </div>
 
       {/* Profils d'affichage */}
       {showProfileSettings && (
-        <div style={{ marginBottom: 16, padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginBottom: 8 }}>Profils d'affichage (Visuel)</div>
+        <div
+          style={{
+            marginBottom: 16,
+            padding: 16,
+            background: tokens.surface,
+            borderRadius: tokens.radius,
+            border: `1px solid ${tokens.border}`,
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 700, color: tokens.textPrimary, marginBottom: 10 }}>
+            Profil d'affichage
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            {profiles.map((profile) => (
-              <button
-                key={profile.id}
-                onClick={() => applyProfile(profile.id)}
-                style={{
-                  minHeight: 40, border: activeProfile === profile.id ? '2px solid #0b5fff' : '1px solid #cbd5e1',
-                  borderRadius: 8, background: activeProfile === profile.id ? '#eff6ff' : '#ffffff',
-                  color: activeProfile === profile.id ? '#0b5fff' : '#475569', cursor: 'pointer',
-                  fontSize: 13, fontWeight: activeProfile === profile.id ? 700 : 500
-                }}
-              >
-                {profile.label}
-              </button>
-            ))}
+            {profiles.map((profile) => {
+              const isActive = activeProfile === profile.id;
+              return (
+                <button
+                  key={profile.id}
+                  onClick={() => applyProfile(profile.id)}
+                  aria-pressed={isActive}
+                  style={{
+                    minHeight: 44,
+                    border: isActive ? `2px solid ${tokens.accent}` : `1px solid ${tokens.border}`,
+                    borderRadius: 8,
+                    background: isActive ? tokens.accentSoftBg : tokens.surface,
+                    color: isActive ? tokens.accent : tokens.textSecondary,
+                    cursor: 'pointer',
+                    fontSize: 13.5,
+                    fontWeight: isActive ? 700 : 500,
+                    fontFamily: 'inherit',
+                    ...focusRing,
+                  }}
+                >
+                  {isActive ? '✓ ' : ''}{profile.label}
+                </button>
+              );
+            })}
           </div>
 
           <button
             onClick={saveProfileSettings}
-            style={{ width: '100%', padding: '12px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', marginTop: 12 }}
+            style={{
+              width: '100%',
+              padding: '12px',
+              background: tokens.accent,
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: 'pointer',
+              marginTop: 14,
+              fontFamily: 'inherit',
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.background = tokens.accentHover)}
+            onMouseOut={(e) => (e.currentTarget.style.background = tokens.accent)}
           >
             Valider ce profil
           </button>
 
           {profileStatus && (
-            <div style={{ marginTop: 10, fontSize: 12, color: '#16a34a', fontWeight: 700 }}>
-              {profileStatus}
+            <div
+              role="status"
+              style={{
+                marginTop: 10,
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: tokens.successBg,
+                fontSize: 13,
+                color: tokens.success,
+                fontWeight: 700,
+              }}
+            >
+              ✓ {profileStatus}
             </div>
           )}
         </div>
@@ -237,62 +386,128 @@ const Popup = () => {
 
       {/* Choix du moteur IA */}
       {showAiSettings && (
-        <div style={{ marginBottom: 16, padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginBottom: 8 }}>Moteur IA</div>
-          <>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-              Fournisseur
-            </label>
-            <select
-              value={aiProvider}
-              onChange={(event) => setAiProvider(event.target.value as AIProvider)}
-              style={{ width: '100%', minHeight: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', marginBottom: 10 }}
-            >
-              {aiProviders.map((provider) => (
-                <option key={provider.id} value={provider.id}>{provider.label}</option>
-              ))}
-            </select>
-            <p style={{ margin: '0 0 12px', fontSize: 12, color: '#64748b', lineHeight: 1.5 }}>
-              {aiProviders.find((provider) => provider.id === aiProvider)?.note}
-            </p>
+        <div
+          style={{
+            marginBottom: 16,
+            padding: 16,
+            background: tokens.surface,
+            borderRadius: tokens.radius,
+            border: `1px solid ${tokens.border}`,
+          }}
+        >
+          <div style={{ fontSize: 14, fontWeight: 700, color: tokens.textPrimary, marginBottom: 10 }}>
+            Moteur d'intelligence artificielle
+          </div>
 
-            {aiProvider === 'openai' && (
-              <>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                  Clé API OpenAI
-                </label>
-                <input
-                  type="password"
-                  value={openAiApiKey}
-                  onChange={(event) => setOpenAiApiKey(event.target.value)}
-                  placeholder="sk-..."
-                  style={{ width: '100%', minHeight: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', marginBottom: 12 }}
-                />
-              </>
-            )}
+          <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: tokens.textSecondary, marginBottom: 6 }}>
+            Fournisseur
+          </label>
+          <select
+            value={aiProvider}
+            onChange={(event) => setAiProvider(event.target.value as AIProvider)}
+            style={{
+              width: '100%',
+              minHeight: 44,
+              borderRadius: 8,
+              border: `1px solid ${tokens.borderStrong}`,
+              padding: '0 10px',
+              marginBottom: 10,
+              fontSize: 14,
+              fontFamily: 'inherit',
+              color: tokens.textPrimary,
+              background: tokens.surface,
+            }}
+          >
+            {aiProviders.map((provider) => (
+              <option key={provider.id} value={provider.id}>{provider.label}</option>
+            ))}
+          </select>
+          <p style={{ margin: '0 0 14px', fontSize: 12.5, color: tokens.textSecondary, lineHeight: 1.6 }}>
+            {aiProviders.find((provider) => provider.id === aiProvider)?.note}
+          </p>
 
-            {aiProvider === 'gemini' && (
-              <>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                  Clé API Gemini
-                </label>
-                <input
-                  type="password"
-                  value={geminiApiKey}
-                  onChange={(event) => setGeminiApiKey(event.target.value)}
-                  placeholder="AIza..."
-                  style={{ width: '100%', minHeight: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', marginBottom: 12 }}
-                />
-              </>
-            )}
+          {aiProvider === 'openai' && (
+            <>
+              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: tokens.textSecondary, marginBottom: 6 }}>
+                Clé API OpenAI
+              </label>
+              <input
+                type="password"
+                value={openAiApiKey}
+                onChange={(event) => setOpenAiApiKey(event.target.value)}
+                placeholder="sk-..."
+                style={{
+                  width: '100%',
+                  minHeight: 44,
+                  borderRadius: 8,
+                  border: `1px solid ${tokens.borderStrong}`,
+                  padding: '0 10px',
+                  marginBottom: 14,
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                }}
+              />
+            </>
+          )}
 
-            <button onClick={saveAiSettings} style={{ width: '100%', padding: '12px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>
-              Enregistrer le moteur IA
-            </button>
-          </>
+          {aiProvider === 'gemini' && (
+            <>
+              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: tokens.textSecondary, marginBottom: 6 }}>
+                Clé API Gemini
+              </label>
+              <input
+                type="password"
+                value={geminiApiKey}
+                onChange={(event) => setGeminiApiKey(event.target.value)}
+                placeholder="AIza..."
+                style={{
+                  width: '100%',
+                  minHeight: 44,
+                  borderRadius: 8,
+                  border: `1px solid ${tokens.borderStrong}`,
+                  padding: '0 10px',
+                  marginBottom: 14,
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                }}
+              />
+            </>
+          )}
+
+          <button
+            onClick={saveAiSettings}
+            style={{
+              width: '100%',
+              padding: '12px',
+              background: tokens.accent,
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.background = tokens.accentHover)}
+            onMouseOut={(e) => (e.currentTarget.style.background = tokens.accent)}
+          >
+            Enregistrer le moteur IA
+          </button>
+
           {aiStatus && (
-            <div style={{ marginTop: 10, fontSize: 12, color: aiStatus.includes('Veuillez') ? '#dc2626' : '#16a34a', fontWeight: 700 }}>
-              {aiStatus}
+            <div
+              role="status"
+              style={{
+                marginTop: 10,
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: aiStatus.includes('Veuillez') ? tokens.errorBg : tokens.successBg,
+                fontSize: 13,
+                color: aiStatus.includes('Veuillez') ? tokens.error : tokens.success,
+                fontWeight: 700,
+              }}
+            >
+              {aiStatus.includes('Veuillez') ? '⚠ ' : '✓ '}{aiStatus}
             </div>
           )}
         </div>
@@ -300,15 +515,17 @@ const Popup = () => {
 
       {showSettingsChooser && (
         <div
+          role="menu"
+          aria-label="Ouvrir les paramètres"
           style={{
             position: 'fixed',
             right: 12,
-            bottom: 56,
-            width: 230,
-            background: '#ffffff',
-            borderRadius: 12,
-            border: '1px solid #e2e8f0',
-            boxShadow: '0 14px 30px rgba(15, 23, 42, 0.22)',
+            bottom: 60,
+            width: 236,
+            background: tokens.surface,
+            borderRadius: tokens.radius,
+            border: `1px solid ${tokens.border}`,
+            boxShadow: '0 12px 26px rgba(31, 42, 55, 0.16)',
             padding: 10,
             zIndex: 1000,
           }}
@@ -320,34 +537,71 @@ const Popup = () => {
               bottom: -8,
               width: 14,
               height: 14,
-              background: '#ffffff',
-              borderRight: '1px solid #e2e8f0',
-              borderBottom: '1px solid #e2e8f0',
+              background: tokens.surface,
+              borderRight: `1px solid ${tokens.border}`,
+              borderBottom: `1px solid ${tokens.border}`,
               transform: 'rotate(45deg)',
             }}
           />
 
-          <div style={{ fontSize: 12, fontWeight: 800, color: '#334155', marginBottom: 8 }}>
-            Ouvrir les settings
+          <div style={{ fontSize: 12, fontWeight: 700, color: tokens.textSecondary, marginBottom: 8, padding: '0 2px' }}>
+            Paramètres
           </div>
 
           <button
             onClick={openProfileSettingsFromChooser}
-            style={{ width: '100%', padding: '9px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', marginBottom: 6, fontSize: 12 }}
+            style={{
+              width: '100%',
+              padding: '10px',
+              background: tokens.accentSoftBg,
+              color: tokens.accent,
+              border: `1px solid ${tokens.accentSoftBorder}`,
+              borderRadius: 8,
+              fontWeight: 700,
+              cursor: 'pointer',
+              marginBottom: 6,
+              fontSize: 13,
+              fontFamily: 'inherit',
+              textAlign: 'left',
+            }}
           >
-            Profil d'affichage
+            🎨 Profil d'affichage
           </button>
 
           <button
             onClick={openAiSettingsFromChooser}
-            style={{ width: '100%', padding: '9px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', marginBottom: 6, fontSize: 12 }}
+            style={{
+              width: '100%',
+              padding: '10px',
+              background: tokens.accentSoftBg,
+              color: tokens.accent,
+              border: `1px solid ${tokens.accentSoftBorder}`,
+              borderRadius: 8,
+              fontWeight: 700,
+              cursor: 'pointer',
+              marginBottom: 6,
+              fontSize: 13,
+              fontFamily: 'inherit',
+              textAlign: 'left',
+            }}
           >
-            Moteur IA
+            🤖 Moteur IA
           </button>
 
           <button
             onClick={() => setShowSettingsChooser(false)}
-            style={{ width: '100%', padding: '8px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 12 }}
+            style={{
+              width: '100%',
+              padding: '9px',
+              background: 'transparent',
+              color: tokens.textSecondary,
+              border: `1px solid ${tokens.border}`,
+              borderRadius: 8,
+              fontWeight: 600,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontFamily: 'inherit',
+            }}
           >
             Fermer
           </button>
@@ -356,95 +610,115 @@ const Popup = () => {
 
       {/* Si l'IA est en train de travailler */}
       {isAnalyzing && (
-        <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', textAlign: 'center', marginBottom: 16 }}>
-          <p style={{ margin: 0, fontWeight: 600, color: '#0b5fff' }}>Lecture et analyse de la page par l'IA...</p>
+        <div
+          role="status"
+          style={{
+            padding: 16,
+            background: tokens.surface,
+            borderRadius: tokens.radius,
+            border: `1px solid ${tokens.border}`,
+            textAlign: 'center',
+            marginBottom: 16,
+          }}
+        >
+          <p style={{ margin: 0, fontWeight: 600, color: tokens.accent, fontSize: 14 }}>
+            Lecture et analyse de la page en cours…
+          </p>
         </div>
       )}
 
-      <button
-        onClick={analyzePageManually}
-        disabled={isAnalyzing}
-        aria-label="Relancer l'analyse de la page"
-        title="Relancer l'analyse"
-        style={{
-          position: 'fixed',
-          left: 12,
-          top: 12,
-          width: 40,
-          height: 40,
-          borderRadius: 999,
-          border: 'none',
-          background: '#0b5fff',
-          color: '#ffffff',
-          fontSize: 18,
-          fontWeight: 800,
-          cursor: isAnalyzing ? 'not-allowed' : 'pointer',
-          opacity: isAnalyzing ? 0.7 : 1,
-          boxShadow: '0 6px 16px rgba(15, 23, 42, 0.24)',
-          zIndex: 1000,
-        }}
-      >
-        ↻
-      </button>
+      {analysisError && !isAnalyzing && (
+        <div
+          role="alert"
+          style={{
+            padding: 14,
+            background: tokens.errorBg,
+            borderRadius: tokens.radius,
+            border: `1px solid ${tokens.errorBg}`,
+            marginBottom: 16,
+            fontSize: 13.5,
+            color: tokens.error,
+            fontWeight: 600,
+          }}
+        >
+          ⚠ {analysisError}
+        </div>
+      )}
 
       {/* RÉSULTATS DE L'ANALYSE */}
       {!isAnalyzing && analysis && (
-        <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-
-          
-          <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Résumé de la page</h3>
-          <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.5, color: '#334155' }}>{analysis.summary}</p>
+        <div
+          style={{
+            padding: 16,
+            background: tokens.surface,
+            borderRadius: tokens.radius,
+            border: `1px solid ${tokens.border}`,
+            marginBottom: 16,
+          }}
+        >
+          <h3 style={{ margin: '0 0 8px', fontSize: 15.5, fontWeight: 700, color: tokens.textPrimary }}>
+            Résumé de la page
+          </h3>
+          <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.6, color: tokens.textPrimary }}>
+            {analysis.summary}
+          </p>
 
           {analysis.steps && analysis.steps.length > 0 && (
             <>
-              <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Étapes à suivre</h3>
-              <ul style={{ margin: '0 0 16px', paddingLeft: 20, color: '#334155', fontSize: 14, lineHeight: 1.5 }}>
+              <h3 style={{ margin: '0 0 8px', fontSize: 15.5, fontWeight: 700, color: tokens.textPrimary }}>
+                Étapes à suivre
+              </h3>
+              <ul style={{ margin: '0 0 16px', paddingLeft: 20, color: tokens.textPrimary, fontSize: 14, lineHeight: 1.6 }}>
                 {analysis.steps.map((step, idx) => <li key={idx} style={{ marginBottom: 6 }}>{step}</li>)}
               </ul>
             </>
           )}
 
-          {/* COORDONNÉES ET CONTACTS (strong/weak keywords gérés côté content-script) */}
-          <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Coordonnées trouvées</h3>
+          {/* COORDONNÉES ET CONTACTS */}
+          <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 16 }}>
+            <h3 style={{ margin: '0 0 10px', fontSize: 15.5, fontWeight: 700, color: tokens.textPrimary }}>
+              Coordonnées trouvées
+            </h3>
             {[
               ['telephone', '📞', 'Téléphone'], ['email', '✉️', 'Email'],
               ['adresse', '📍', 'Adresse'], ['horaires', '🕒', 'Horaires']
-            ].map(([key, icon, label]) => {
+            ].map(([key, icon]) => {
               const value = analysis.contactInfo?.[key as keyof ContactInfo];
               if (!value) return null;
               return (
-                <div key={key} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, fontSize: 14, color: '#334155' }}>
-                  <span>{icon}</span> <strong>{value}</strong>
+                <div key={key} style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, fontSize: 14, color: tokens.textPrimary }}>
+                  <span aria-hidden="true">{icon}</span> <strong>{value}</strong>
                 </div>
               );
             })}
             {analysis.contactInfo?.contactLink && (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, fontSize: 14, color: '#334155' }}>
-                <span>📩</span>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, fontSize: 14 }}>
+                <span aria-hidden="true">📩</span>
                 <a
                   href={analysis.contactInfo.contactLink}
                   target="_blank"
                   rel="noreferrer"
-                  style={{ color: '#0b5fff', fontWeight: 700, textDecoration: 'underline' }}
+                  style={{ color: tokens.accent, fontWeight: 700, textDecoration: 'underline' }}
                 >
                   {analysis.contactInfo.contactLabel || 'Page de contact'}
                 </a>
               </div>
             )}
             {(!analysis.contactInfo?.telephone && !analysis.contactInfo?.email && !analysis.contactInfo?.contactLink) && (
-              <span style={{ fontSize: 13, color: '#64748b' }}>Aucun contact détecté.</span>
+              <span style={{ fontSize: 13, color: tokens.textSecondary }}>Aucun contact détecté.</span>
             )}
           </div>
 
-          {/* GLOSSAIRE (Mots compliqués détectés) */}
+          {/* GLOSSAIRE */}
           {analysis.glossary && analysis.glossary.length > 0 && (
-            <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16, marginTop: 12 }}>
-              <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Mots compliqués présents</h3>
-              <div style={{ background: '#f1f5f9', padding: '12px 12px 4px 12px', borderRadius: 8 }}>
+            <div style={{ borderTop: `1px solid ${tokens.border}`, paddingTop: 16, marginTop: 12 }}>
+              <h3 style={{ margin: '0 0 10px', fontSize: 15.5, fontWeight: 700, color: tokens.textPrimary }}>
+                Mots compliqués présents
+              </h3>
+              <div style={{ background: tokens.bg, padding: '12px 12px 4px 12px', borderRadius: 8 }}>
                 {analysis.glossary.map((entry, idx) => (
-                  <div key={idx} style={{ marginBottom: 8, fontSize: 13, color: '#334155', lineHeight: 1.4 }}>
-                    <strong style={{ color: '#0b5fff' }}>{entry.term}</strong> : {entry.definition}
+                  <div key={idx} style={{ marginBottom: 10, fontSize: 13.5, color: tokens.textPrimary, lineHeight: 1.5 }}>
+                    <strong style={{ color: tokens.accent }}>{entry.term}</strong> : {entry.definition}
                   </div>
                 ))}
               </div>
@@ -453,28 +727,34 @@ const Popup = () => {
         </div>
       )}
 
+      {/* Bouton settings — libellé et icône cohérents */}
       <button
-        onClick={() => {
-          setShowSettingsChooser(true);
-        }}
+        onClick={() => setShowSettingsChooser(true)}
+        aria-haspopup="menu"
+        aria-expanded={showSettingsChooser}
         style={{
           position: 'fixed',
           right: 12,
           bottom: 12,
-          minHeight: 36,
-          padding: '0 12px',
-          background: '#0f172a',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          minHeight: 40,
+          padding: '0 14px',
+          background: tokens.neutralDark,
           color: '#ffffff',
           border: 'none',
           borderRadius: 999,
-          fontSize: 12,
+          fontSize: 13,
           fontWeight: 700,
+          fontFamily: 'inherit',
           cursor: 'pointer',
-          boxShadow: '0 6px 16px rgba(15, 23, 42, 0.24)',
+          boxShadow: '0 6px 14px rgba(31, 42, 55, 0.18)',
           zIndex: 999,
         }}
       >
-        Settings
+        <span aria-hidden="true">⚙️</span>
+        Paramètres
       </button>
     </div>
   );
