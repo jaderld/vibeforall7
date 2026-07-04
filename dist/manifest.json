@@ -32,7 +32,7 @@
   "content_scripts": [
     {
       "js": [
-        "assets/content-script.js-BYDc9apW.js"
+        "assets/content-script.js-BrCTVlUr.js"
       ],
       "matches": [
         "<all_urls>"
@@ -51,7 +51,7 @@
         "<all_urls>"
       ],
       "resources": [
-        "assets/content-script.js-BYDc9apW.js"
+        "assets/content-script.js-BrCTVlUr.js"
       ],
       "use_dynamic_url": false
     }
