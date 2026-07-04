@@ -10,6 +10,7 @@ type ContactInfo = {
   horaires?: string;
 };
 type GlossaryEntry = { term: string; definition: string };
+type TextReplacement = { original: string; replacement: string };
 type StorageData = {
   contactInfo?: ContactInfo;
   [key: string]: any;
@@ -35,6 +36,14 @@ const IGNORED_ZONES_SELECTOR = 'script, style, noscript, svg, iframe, textarea, 
 let activeProfile: Profile = 'standard';
 let currentPopover: HTMLDivElement | null = null;
 let observer: MutationObserver | null = null;
+
+// Données de simplification proposées par l'IA (voir BackgroundController / FETCH_ANALYSIS).
+// Vides par défaut : dans ce cas, applyVisualModifications() s'appuie uniquement sur les
+// règles statiques ci-dessous, qui restent TOUJOURS actives comme filet de sécurité —
+// même quand l'IA répond, pour couvrir ce qu'elle n'aurait pas détecté.
+let aiReplacements: TextReplacement[] = [];
+let aiGlossary: GlossaryEntry[] = [];
+let aiUiLabels: TextReplacement[] = [];
 
 // ==========================================
 // 1. GESTION DES PROFILS (CSS)
@@ -200,6 +209,45 @@ function extractContactInfo(text: string): Partial<ContactInfo> {
   return info;
 }
 
+// Nettoie les données de simplification reçues du background (défensif : même si
+// BackgroundController sanitize déjà sa réponse, on ne fait jamais confiance
+// aveuglément à un message chrome.runtime).
+function sanitizeAiTextReplacements(value: unknown): TextReplacement[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is TextReplacement =>
+      Boolean(item) &&
+      typeof item === 'object' &&
+      typeof (item as any).original === 'string' &&
+      typeof (item as any).replacement === 'string' &&
+      (item as any).original.trim().length > 0,
+    )
+    .map((item) => ({ original: item.original.trim(), replacement: item.replacement.trim() }));
+}
+
+function sanitizeAiGlossary(value: unknown): GlossaryEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is GlossaryEntry =>
+      Boolean(item) &&
+      typeof item === 'object' &&
+      typeof (item as any).term === 'string' &&
+      typeof (item as any).definition === 'string' &&
+      (item as any).term.trim().length > 0,
+    )
+    .map((item) => ({ term: item.term.trim(), definition: item.definition.trim() }));
+}
+
+// Échappe les caractères spéciaux regex pour construire un motif de remplacement
+// littéral à partir d'un texte arbitraire renvoyé par l'IA.
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildLiteralRegex(original: string): RegExp {
+  return new RegExp(escapeRegExp(original), 'gi');
+}
+
 async function analyzePageSilent() {
   chrome.runtime.sendMessage({ type: 'ANALYSIS_STARTED' }).catch(() => {});
   const blocks = collectBlocks();
@@ -218,6 +266,15 @@ async function analyzePageSilent() {
     // On vérifie si l'IA a échoué, mais ON NE FAIT PLUS CRASHER LE SCRIPT (pas de "throw")
     const hasAiError = chrome.runtime.lastError || !response || response.error;
     const aiErrorMessage = chrome.runtime.lastError?.message || response?.error || '';
+
+    // Remplacements / glossaire / libellés UI proposés par l'IA (voir BackgroundController).
+    // On les stocke au niveau module : applyVisualModifications() les utilisera en priorité,
+    // les règles statiques restant actives en filet de sécurité dans tous les cas.
+    if (!hasAiError) {
+      aiReplacements = sanitizeAiTextReplacements(response.replacements);
+      aiGlossary = sanitizeAiGlossary(response.glossary);
+      aiUiLabels = sanitizeAiTextReplacements(response.ui_labels);
+    }
 
     // On prépare le paquet de données (IA + Local)
     const analysisData = {
@@ -244,6 +301,11 @@ async function analyzePageSilent() {
 
     // On envoie à la barre latérale
     chrome.runtime.sendMessage({ type: 'ANALYSIS_COMPLETE', data: analysisData }).catch(() => {});
+
+    // On ré-applique la simplification visuelle maintenant que les remplacements et le
+    // glossaire IA sont disponibles : ils s'ajoutent aux règles statiques déjà appliquées
+    // (celles-ci ont servi de retour immédiat pendant que l'IA travaillait).
+    applyVisualModifications();
   } catch (error) {
     chrome.runtime.sendMessage({ type: 'ANALYSIS_ERROR' }).catch(() => {});
   }
@@ -496,10 +558,17 @@ function applyVisualModifications() {
 
   type ReplacerFunc = (substring: string, ...args: any[]) => string;
 
-  // Uniquement des remplacements sûrs, ciblés sur la navigation d'une démarche
+  // 1) Remplacements proposés par l'IA (littéraux, tels que renvoyés sur CE chargement de page).
+  const aiTextReplacements: Array<[RegExp, string]> = aiReplacements.map((entry) => [
+    buildLiteralRegex(entry.original),
+    entry.replacement,
+  ]);
+
+  // 2) Règles statiques : toujours actives, en complément de l'IA (elles couvrent ce que
+  // l'IA n'a pas détecté, et sont la seule protection si l'IA est indisponible).
   // (on a retiré les remplacements trop larges type "documents" / "dossier" / "justificatif"
   // qui changeaient le sens de mots courants partout sur la page)
-  const replacements: Array<[RegExp, string | ReplacerFunc]> = [
+  const staticReplacements: Array<[RegExp, string | ReplacerFunc]> = [
     // 👤 PROFILS DYNAMIQUES ("Vous êtes un(e) X" -> "X")
     [/\bvous êtes un(?:e)?\s+([a-zà-ÿ]+)\b/gi, (match, mot) => mot.toUpperCase()],
 
@@ -552,6 +621,12 @@ function applyVisualModifications() {
     [/\bdéconnexion\b/gi, 'DÉCONNEXION']
   ];
 
+  // L'IA passe en premier : ses remplacements sont essayés avant les règles statiques.
+  // Une fois qu'un motif a été remplacé (par l'IA ou par une règle statique), le motif
+  // d'origine n'existe plus dans le texte, donc le passage suivant ne peut pas le
+  // re-modifier — pas de conflit entre les deux sources.
+  const replacements: Array<[RegExp, string | ReplacerFunc]> = [...aiTextReplacements, ...staticReplacements];
+
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
 
   const textNodes: Text[] = [];
@@ -583,8 +658,13 @@ function applyVisualModifications() {
     }
 
     // 2. glossaire → highlight léger sans casser DOM
-    TERM_DEFINITIONS.forEach((entry) => {
-      const regex = new RegExp(`\\b${entry.term}\\b`, 'i');
+    // Glossaire IA d'abord (termes détectés spécifiquement sur cette page), puis
+    // glossaire statique en complément (le garde-fou dataset.failcProcessed évite
+    // tout double traitement si un terme apparaît dans les deux listes).
+    const glossaryEntries: GlossaryEntry[] = [...aiGlossary, ...TERM_DEFINITIONS];
+
+    glossaryEntries.forEach((entry) => {
+      const regex = new RegExp(`\\b${escapeRegExp(entry.term)}\\b`, 'i');
       if (regex.test(node.nodeValue || '')) {
         const parent = node.parentElement;
         if (!parent) return;
@@ -620,7 +700,22 @@ function applyVisualModifications() {
       el.textContent?.trim() ||
       "";
 
-    const simplified = simplifyUIButton(text);
+    // Libellé IA d'abord (correspondance sur le texte normalisé du bouton/lien),
+    // sinon on retombe sur la détection par mot-clé statique (simplifyUIButton).
+    let simplified: string | null = null;
+
+    if (aiUiLabels.length > 0) {
+      const normalizedText = normalize(text);
+      const aiMatch = aiUiLabels.find((entry) => normalizedText.includes(normalize(entry.original)));
+      if (aiMatch && aiMatch.replacement.trim()) {
+        simplified = aiMatch.replacement.trim().toUpperCase();
+      }
+    }
+
+    if (!simplified) {
+      simplified = simplifyUIButton(text);
+    }
+
     const isDemarche = !simplified && isNoteworthyDemarcheLink(text);
 
     if (!simplified && !isDemarche) return;
