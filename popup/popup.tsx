@@ -3,11 +3,7 @@ import ReactDOM from 'react-dom/client';
 
 type Profile = 'standard' | 'dyslexia' | 'low-vision' | 'anti-epilepsy';
 type AIProvider = 'openai' | 'gemini';
-<<<<<<< HEAD
-type ContactInfo = { telephone: string; email: string; adresse: string; horaires: string; };
-=======
-type ContactInfo = { telephone: string; email: string; adresse: string; horaires: string; contactLink: string; contactLabel: string; };
->>>>>>> origin/main
+type ContactInfo = { telephone: string; email: string; adresse: string; horaires: string; contactLink?: string; contactLabel?: string; };
 
 type AnalysisData = {
   summary: string;
@@ -35,7 +31,6 @@ const AI_STORAGE_KEYS = {
   settingsDone: 'failcAiSettingsDone',
 } as const;
 
-<<<<<<< HEAD
 const PROFILE_STORAGE_KEYS = {
   profile: 'failcProfile',
   settingsDone: 'failcProfileSettingsDone',
@@ -43,8 +38,6 @@ const PROFILE_STORAGE_KEYS = {
 
 const getAnalysisStorageKey = (url: string) => `failc:${url}`;
 
-=======
->>>>>>> origin/main
 const Popup = () => {
   const [activeProfile, setActiveProfile] = useState<Profile>('standard');
   const [aiProvider, setAiProvider] = useState<AIProvider>('openai');
@@ -52,12 +45,9 @@ const Popup = () => {
   const [geminiApiKey, setGeminiApiKey] = useState<string>('');
   const [aiStatus, setAiStatus] = useState<string>('');
   const [showAiSettings, setShowAiSettings] = useState<boolean>(true);
-<<<<<<< HEAD
   const [showProfileSettings, setShowProfileSettings] = useState<boolean>(true);
   const [showSettingsChooser, setShowSettingsChooser] = useState<boolean>(false);
   const [profileStatus, setProfileStatus] = useState<string>('');
-=======
->>>>>>> origin/main
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
   const [analysisError, setAnalysisError] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
@@ -81,16 +71,6 @@ useEffect(() => {
           setAnalysis(message.data);
           setAnalysisError('');
         }
-      }
-      if (message.type === 'CONTACT_FOUND' && message.data) {
-        setAnalysis((prev) => prev ? {
-          ...prev,
-          contactInfo: {
-            ...prev.contactInfo,
-            contactLink: message.data.url,
-            contactLabel: message.data.label,
-          },
-        } : prev);
       }
     };
     chrome.runtime.onMessage.addListener(messageListener);
@@ -124,21 +104,13 @@ useEffect(() => {
       },
     );
 
-<<<<<<< HEAD
     // 3. Chargement du cache d'analyse de la page courante
-=======
-    // 3. Lancement automatique de l'analyse
->>>>>>> origin/main
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tabUrl = tabs[0]?.url || '';
       if (!tabUrl) return;
 
       const cleanUrl = tabUrl.split('#')[0];
-<<<<<<< HEAD
       const urlKey = getAnalysisStorageKey(cleanUrl);
-=======
-      const urlKey = `failc:${cleanUrl}`;
->>>>>>> origin/main
 
       chrome.storage.local.get([urlKey], (result) => {
         if (result[urlKey]) {
@@ -174,7 +146,6 @@ useEffect(() => {
     });
   };
 
-<<<<<<< HEAD
   const saveProfileSettings = () => {
     chrome.storage.local.get([PROFILE_STORAGE_KEYS.settingsDone], (result) => {
       const wasFirstChoice = !Boolean(result[PROFILE_STORAGE_KEYS.settingsDone]);
@@ -191,8 +162,6 @@ useEffect(() => {
     });
   };
 
-=======
->>>>>>> origin/main
   const saveAiSettings = () => {
     const selectedKey = aiProvider === 'openai' ? openAiApiKey.trim() : geminiApiKey.trim();
     if (!selectedKey) {
@@ -203,13 +172,8 @@ useEffect(() => {
 
     chrome.storage.local.set({
       [AI_STORAGE_KEYS.provider]: aiProvider,
-<<<<<<< HEAD
       [AI_STORAGE_KEYS.openaiKey]: aiProvider === 'openai' ? openAiApiKey.trim() : '',
       [AI_STORAGE_KEYS.geminiKey]: aiProvider === 'gemini' ? geminiApiKey.trim() : '',
-=======
-      [AI_STORAGE_KEYS.openaiKey]: openAiApiKey.trim(),
-      [AI_STORAGE_KEYS.geminiKey]: geminiApiKey.trim(),
->>>>>>> origin/main
       [AI_STORAGE_KEYS.settingsDone]: true,
     }, () => {
       setAiStatus('Paramètres IA enregistrés.');
@@ -218,7 +182,6 @@ useEffect(() => {
     });
   };
 
-<<<<<<< HEAD
   const openProfileSettingsFromChooser = () => {
     setShowProfileSettings(true);
     setShowAiSettings(false);
@@ -233,8 +196,6 @@ useEffect(() => {
     setProfileStatus('');
   };
 
-=======
->>>>>>> origin/main
   const triggerPageModifications = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
@@ -248,11 +209,7 @@ useEffect(() => {
 
   return (
     <div style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 72, fontFamily: 'Arial, sans-serif', background: '#f8fafc', color: '#0f172a' }}>
-<<<<<<< HEAD
       
-=======
-
->>>>>>> origin/main
       {/* En-tête */}
       <div style={{ background: 'linear-gradient(135deg, #0b5fff 0%, #2563eb 100%)', color: '#fff', padding: 16, borderRadius: 12, marginBottom: 16 }}>
         <div style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.9 }}>FAILC Assistant</div>
@@ -414,69 +371,6 @@ useEffect(() => {
         </div>
       )}
 
-      {/* Choix du moteur IA */}
-      {showAiSettings && (
-        <div style={{ marginBottom: 16, padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0' }}>
-          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginBottom: 8 }}>Moteur IA</div>
-          <>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-              Fournisseur
-            </label>
-            <select
-              value={aiProvider}
-              onChange={(event) => setAiProvider(event.target.value as AIProvider)}
-              style={{ width: '100%', minHeight: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', marginBottom: 10 }}
-            >
-              {aiProviders.map((provider) => (
-                <option key={provider.id} value={provider.id}>{provider.label}</option>
-              ))}
-            </select>
-            <p style={{ margin: '0 0 12px', fontSize: 12, color: '#64748b', lineHeight: 1.5 }}>
-              {aiProviders.find((provider) => provider.id === aiProvider)?.note}
-            </p>
-
-            {aiProvider === 'openai' && (
-              <>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                  Clé API OpenAI
-                </label>
-                <input
-                  type="password"
-                  value={openAiApiKey}
-                  onChange={(event) => setOpenAiApiKey(event.target.value)}
-                  placeholder="sk-..."
-                  style={{ width: '100%', minHeight: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', marginBottom: 12 }}
-                />
-              </>
-            )}
-
-            {aiProvider === 'gemini' && (
-              <>
-                <label style={{ display: 'block', fontSize: 12, fontWeight: 700, color: '#475569', marginBottom: 6 }}>
-                  Clé API Gemini
-                </label>
-                <input
-                  type="password"
-                  value={geminiApiKey}
-                  onChange={(event) => setGeminiApiKey(event.target.value)}
-                  placeholder="AIza..."
-                  style={{ width: '100%', minHeight: 40, borderRadius: 8, border: '1px solid #cbd5e1', padding: '0 10px', marginBottom: 12 }}
-                />
-              </>
-            )}
-
-            <button onClick={saveAiSettings} style={{ width: '100%', padding: '12px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer' }}>
-              Enregistrer le moteur IA
-            </button>
-          </>
-          {aiStatus && (
-            <div style={{ marginTop: 10, fontSize: 12, color: aiStatus.includes('Veuillez') ? '#dc2626' : '#16a34a', fontWeight: 700 }}>
-              {aiStatus}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Si l'IA est en train de travailler */}
       {isAnalyzing && (
         <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', textAlign: 'center', marginBottom: 16 }}>
@@ -518,10 +412,10 @@ useEffect(() => {
       {/* RÉSULTATS DE L'ANALYSE */}
       {!isAnalyzing && analysis && (
         <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-
+          
           <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Résumé de la page</h3>
           <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.5, color: '#334155' }}>{analysis.summary}</p>
-
+          
           {analysis.steps && analysis.steps.length > 0 && (
             <>
               <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Étapes à suivre</h3>
@@ -532,13 +426,13 @@ useEffect(() => {
           )}
 
           {/* LE BOUTON POUR MODIFIER LA PAGE */}
-          <button
-            onClick={triggerPageModifications}
+          <button 
+            onClick={triggerPageModifications} 
             disabled={hasModifiedPage}
-            style={{
-              width: '100%', minHeight: 44, borderRadius: 8, border: 'none',
-              background: hasModifiedPage ? '#22c55e' : '#f97316',
-              color: '#fff', cursor: hasModifiedPage ? 'default' : 'pointer',
+            style={{ 
+              width: '100%', minHeight: 44, borderRadius: 8, border: 'none', 
+              background: hasModifiedPage ? '#22c55e' : '#f97316', 
+              color: '#fff', cursor: hasModifiedPage ? 'default' : 'pointer', 
               fontSize: 14, fontWeight: 700, marginBottom: 16
             }}
           >
@@ -560,20 +454,7 @@ useEffect(() => {
                 </div>
               );
             })}
-            {analysis.contactInfo?.contactLink && (
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, fontSize: 14, color: '#334155' }}>
-                <span>📩</span>
-                <a
-                  href={analysis.contactInfo.contactLink}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{ color: '#0b5fff', fontWeight: 700, textDecoration: 'underline' }}
-                >
-                  {analysis.contactInfo.contactLabel || 'Page de contact'}
-                </a>
-              </div>
-            )}
-            {(!analysis.contactInfo?.telephone && !analysis.contactInfo?.email && !analysis.contactInfo?.contactLink) && (
+            {(!analysis.contactInfo?.telephone && !analysis.contactInfo?.email) && (
               <span style={{ fontSize: 13, color: '#64748b' }}>Aucun contact détecté.</span>
             )}
           </div>
@@ -602,12 +483,7 @@ useEffect(() => {
 
       <button
         onClick={() => {
-<<<<<<< HEAD
           setShowSettingsChooser(true);
-=======
-          setShowAiSettings(true);
-          setAiStatus('');
->>>>>>> origin/main
         }}
         style={{
           position: 'fixed',
