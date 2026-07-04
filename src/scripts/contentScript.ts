@@ -42,7 +42,7 @@ function applyProfileStyles(profile: Profile) {
     ? `body, body * { font-family: Arial, sans-serif !important; line-height: 1.65 !important; text-align: left !important; letter-spacing: 0.01em !important; }`
     : profile === 'low-vision'
       ? `body { background: #111 !important; color: #f8f8f8 !important; } body * { color: inherit !important; } body a, body button, body p, body li, body h1, body h2 { font-size: 1.2em !important; }`
-      : `* { animation: none !important; transition: none !important; } video { autoplay: false !important; }`;
+      : `* { animation: none !important; transition: none !important; }`;
   document.head.appendChild(style);
 }
 
