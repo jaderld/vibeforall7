@@ -496,6 +496,10 @@ function init() {
 
   if (!isSupportedSite()) return;
 
+  // Apply simplification immediately so users don't need to click in the popup.
+  applyVisualModifications();
+  refreshContactLinkIfNeeded();
+
   chrome.storage.local.get(['failcProfile'], (result) => {
     activeProfile = (result.failcProfile as Profile) || 'standard';
     applyProfileStyles(activeProfile);
@@ -505,6 +509,7 @@ function init() {
     if (message.type === 'SET_PROFILE') {
       activeProfile = message.profile;
       applyProfileStyles(activeProfile);
+      applyVisualModifications();
     }
     if (message.type === 'EXTRACT_PAGE_CONTENT') {
       sendResponse({ pageContent: extractPageContent() });

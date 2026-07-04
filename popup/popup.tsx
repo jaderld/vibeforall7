@@ -51,7 +51,6 @@ const Popup = () => {
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
   const [analysisError, setAnalysisError] = useState<string>('');
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
-  const [hasModifiedPage, setHasModifiedPage] = useState<boolean>(false);
 
 useEffect(() => {
     // 1. Écoute des messages venant du content-script
@@ -197,17 +196,6 @@ useEffect(() => {
     setShowProfileSettings(false);
     setShowSettingsChooser(false);
     setProfileStatus('');
-  };
-
-  const triggerPageModifications = () => {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, { type: 'MODIFY_PAGE' }).catch(() => {
-          alert("Veuillez actualiser la page (F5) pour appliquer les modifications.");
-        });
-        setHasModifiedPage(true);
-      }
-    });
   };
 
   return (
@@ -417,6 +405,10 @@ useEffect(() => {
       {/* RÉSULTATS DE L'ANALYSE */}
       {!isAnalyzing && analysis && (
         <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
+
+          <div style={{ margin: '0 0 12px', fontSize: 12, color: '#16a34a', fontWeight: 700 }}>
+            Simplification visuelle active automatiquement.
+          </div>
           
           <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Résumé de la page</h3>
           <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.5, color: '#334155' }}>{analysis.summary}</p>
@@ -429,20 +421,6 @@ useEffect(() => {
               </ul>
             </>
           )}
-
-          {/* LE BOUTON POUR MODIFIER LA PAGE */}
-          <button 
-            onClick={triggerPageModifications} 
-            disabled={hasModifiedPage}
-            style={{ 
-              width: '100%', minHeight: 44, borderRadius: 8, border: 'none', 
-              background: hasModifiedPage ? '#22c55e' : '#f97316', 
-              color: '#fff', cursor: hasModifiedPage ? 'default' : 'pointer', 
-              fontSize: 14, fontWeight: 700, marginBottom: 16
-            }}
-          >
-            {hasModifiedPage ? '✓ Page adaptée avec succès' : 'Surligner & Simplifier la page web'}
-          </button>
 
           {/* COORDONNÉES ET CONTACTS */}
           <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: 16 }}>
