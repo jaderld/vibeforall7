@@ -437,7 +437,20 @@ useEffect(() => {
                 </div>
               );
             })}
-            {(!analysis.contactInfo?.telephone && !analysis.contactInfo?.email) && (
+            {analysis.contactInfo?.contactLink && (
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8, fontSize: 14, color: '#334155' }}>
+                <span>📩</span>
+                <a
+                  href={analysis.contactInfo.contactLink}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: '#0b5fff', fontWeight: 700, textDecoration: 'underline' }}
+                >
+                  {analysis.contactInfo.contactLabel || 'Page de contact'}
+                </a>
+              </div>
+            )}
+            {(!analysis.contactInfo?.telephone && !analysis.contactInfo?.email && !analysis.contactInfo?.contactLink) && (
               <span style={{ fontSize: 13, color: '#64748b' }}>Aucun contact détecté.</span>
             )}
           </div>
