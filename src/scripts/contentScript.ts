@@ -61,17 +61,21 @@ async function analyzePageSilent() {
   const visibleText = extractedContent;
   
   try {
-    const response = await new Promise<any>((resolve) => {
-      chrome.runtime.sendMessage({ type: 'FETCH_ANALYSIS' }, resolve);
+    const { response, lastErrorMessage } = await new Promise<{
+      response: any;
+      lastErrorMessage?: string;
+    }>((resolve) => {
+      chrome.runtime.sendMessage({ type: 'FETCH_ANALYSIS' }, (resp) => {
+        resolve({ response: resp, lastErrorMessage: chrome.runtime.lastError?.message });
+      });
     });
 
     const cleanUrl = location.href.split('#')[0];
     const storageKey = `${STORAGE_PREFIX}${cleanUrl}`;
-    
-    // On vérifie si l'IA a échoué, mais ON NE FAIT PLUS CRASHER LE SCRIPT (pas de "throw")
-    const hasAiError = chrome.runtime.lastError || !response || response.error;
-    const aiErrorMessage = chrome.runtime.lastError?.message || response?.error || '';
 
+    // On vérifie si l'IA a échoué, mais ON NE FAIT PLUS CRASHER LE SCRIPT (pas de "throw")
+    const hasAiError = Boolean(lastErrorMessage || !response || response.error);
+    const aiErrorMessage = lastErrorMessage || response?.error || '';
     // On prépare le paquet de données (IA + Local)
     const analysisData = { 
       // Si l'IA a planté, on met un message par défaut, sinon on met le vrai résumé
