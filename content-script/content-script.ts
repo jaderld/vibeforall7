@@ -91,70 +91,82 @@ function collectBlocks() {
 }
 
 // Mots-clés désignant un accès au contact/support/prise de rendez-vous
-const CONTACT_KEYWORDS = [
+const STRONG_CONTACT_KEYWORDS = [
   'contact', 'contactez', 'nous contacter', 'nous joindre',
-  'aide', 'faq', 'support', 'assistance',
   'rendez-vous', 'rendezvous', 'rdv', 'prendre rendez-vous'
 ];
 
+const WEAK_CONTACT_KEYWORDS = [
+  'aide', 'faq', 'support', 'assistance'
+];
 // Cherche le lien/bouton de contact sur la page et renvoie son libellé + son URL
 // Cherche le premier lien/bouton de contact sur la page et renvoie son libellé + son URL
 function findContactLink(): { label: string; url: string } | null {
   const candidates = Array.from(document.querySelectorAll('a, button'));
 
-  for (const el of candidates) {
-    if (!(el instanceof HTMLElement)) continue;
+  // Fonction interne pour chercher avec une liste précise de mots-clés
+  const searchWithKeywords = (keywords: string[]) => {
+    for (const el of candidates) {
+      if (!(el instanceof HTMLElement)) continue;
 
-    // On exclut les éléments manifestement cachés à l'écran
-    const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+      // On exclut les éléments manifestement cachés à l'écran
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
 
-    const rawText =
-      el.innerText?.trim() ||
-      el.getAttribute('aria-label') ||
-      el.textContent?.trim() ||
-      '';
+      const rawText =
+        el.innerText?.trim() ||
+        el.getAttribute('aria-label') ||
+        el.textContent?.trim() ||
+        '';
 
-    const text = normalize(rawText);
-    if (!text) continue;
+      const text = normalize(rawText);
+      if (!text) continue;
 
-    const matched = CONTACT_KEYWORDS.some((kw) => text.includes(kw));
-    if (!matched) continue;
+      // FILTRE ANTI-FAUX POSITIFS : Un bouton de contact est généralement court.
+      // Si le texte fait plus de 60 caractères, c'est probablement une phrase ou un article.
+      if (text.length > 60) continue;
 
-    // On récupère le lien brut (dans le HTML) ET l'URL absolue résolue par le navigateur
-    const rawHref = el.getAttribute('href') || '';
-    const url = (el as HTMLAnchorElement).href || rawHref;
-    
-    // FILTRE 1 : On ignore directement les ancres brutes, la racine ou le JS
-    if (
-      !url || 
-      rawHref === '#' || 
-      rawHref === '/' || 
-      rawHref.startsWith('#') || 
-      rawHref.startsWith('javascript:')
-    ) {
-      continue;
-    }
+      const matched = keywords.some((kw) => text.includes(kw));
+      if (!matched) continue;
 
-    // FILTRE 2 : On ignore les "tabs" (liens pointant vers la même page avec une ancre #)
-    try {
-      const parsedUrl = new URL(url, window.location.href);
-      const currentUrl = new URL(window.location.href);
+      // On récupère le lien brut et l'URL absolue
+      const rawHref = el.getAttribute('href') || '';
+      const url = (el as HTMLAnchorElement).href || rawHref;
       
-      // Si l'URL a le même chemin d'accès que la page actuelle et possède un "#", on ignore
-      if (parsedUrl.pathname === currentUrl.pathname && parsedUrl.hash) {
+      // FILTRE 1 : On ignore les ancres brutes, la racine ou le JS
+      if (
+        !url || 
+        rawHref === '#' || 
+        rawHref === '/' || 
+        rawHref.startsWith('#') || 
+        rawHref.startsWith('javascript:')
+      ) {
         continue;
       }
-    } catch (e) {
-      // Si l'URL est mal formée, on l'ignore
-      continue;
+
+      // FILTRE 2 : On ignore les liens pointant vers la même page avec une ancre
+      try {
+        const parsedUrl = new URL(url, window.location.href);
+        const currentUrl = new URL(window.location.href);
+        
+        if (parsedUrl.pathname === currentUrl.pathname && parsedUrl.hash) {
+          continue;
+        }
+      } catch (e) {
+        continue;
+      }
+
+      return { label: rawText, url };
     }
+    return null;
+  };
 
-    // Si on arrive ici, c'est un vrai lien vers une AUTRE page (la vraie page de contact)
-    return { label: rawText, url };
-  }
+  // 1. On cherche d'abord les VRAIS boutons de contact (Priorité absolue)
+  const strongMatch = searchWithKeywords(STRONG_CONTACT_KEYWORDS);
+  if (strongMatch) return strongMatch;
 
-  return null;
+  // 2. Si aucun bouton "Contact" n'est trouvé, on se rabat sur "Aide", "FAQ", etc.
+  return searchWithKeywords(WEAK_CONTACT_KEYWORDS);
 }
 
 // Extrait les coordonnées directement depuis le texte brut
@@ -471,11 +483,12 @@ function highlightElement(el: HTMLElement) {
 function applyVisualModifications() {
   // Champs de recherche (placeholder / aria-label) — traités séparément du texte visible
   simplifySearchFields();
+  type ReplacerFunc = (substring: string, ...args: any[]) => string;
 
-  // Uniquement des remplacements sûrs, ciblés sur la navigation d'une démarche
-  // (on a retiré les remplacements trop larges type "documents" / "dossier" / "justificatif"
-  // qui changeaient le sens de mots courants partout sur la page)
-  const replacements: Array<[RegExp, string]> = [
+  const replacements: Array<[RegExp, string | ReplacerFunc]> = [
+    // 👤 PROFILS DYNAMIQUES ("Vous êtes un(e) X" -> "X")
+    [/\bvous êtes un(?:e)?\s+([a-zà-ÿ]+)\b/gi, (match, mot) => mot.toUpperCase()],
+
     // 🔍 RECHERCHE
     [/\bque cherchez[- ]vous\s*\??/gi, 'RECHERCHE'],
     [/\brechercher\b/gi, 'RECHERCHE'],
@@ -546,7 +559,8 @@ function applyVisualModifications() {
 
     // 1. simplification texte simple (SAFE) — remplacements ciblés uniquement
     replacements.forEach(([pattern, replacement]) => {
-      modified = modified.replace(pattern, replacement);
+      // Le 'as any' fait taire TypeScript sur l'overload, tout en fonctionnant parfaitement en JS
+      modified = modified.replace(pattern, replacement as any);
     });
 
     if (modified !== text) {
