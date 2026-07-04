@@ -17,13 +17,13 @@ type StorageData = {
 
 const STORAGE_PREFIX = 'failc:';
 const TERM_DEFINITIONS: Array<{ term: string; definition: string }> = [
-  { term: 'avis d\'imposition', definition: 'Document envoyé par l'administration pour expliquer le montant de votre impôt.' },
+  { term: "avis d'imposition", definition: "Document envoyé par l'administration pour expliquer le montant de votre impôt." },
   { term: 'cotisation', definition: 'Montant payé pour financer un service ou une assurance.' },
   { term: 'complémentaire santé', definition: 'Garantie qui complète la couverture de base pour les soins médicaux.' },
-  { term: 'caf', definition: 'Caisse d'allocations familiales, organisme qui gère certaines aides.' },
+  { term: 'caf', definition: 'Caisse d\'allocations familiales, organisme qui gère certaines aides.' },
   { term: 'urssaf', definition: 'Organisme chargé du contrôle et du recouvrement des cotisations sociales.' },
-  { term: 'allocation', definition: 'Aide financière versée par l'État ou un organisme public.' },
-  { term: 'démarche', definition: 'Action administrative à réaliser auprès d'un service public.' }
+  { term: 'allocation', definition: "Aide financière versée par l'État ou un organisme public." },
+  { term: 'démarche', definition: "Action administrative à réaliser auprès d'un service public." }
 ];
 
 // Zones techniques à ignorer (jamais de contenu visible pertinent à modifier).
@@ -357,7 +357,7 @@ function applyVisualModifications() {
     [/\bannuler\b/gi, 'RETOUR'],
     [/\brevenir\b/gi, 'RETOUR'],
     [/\bretour\b/gi, 'RETOUR'],
-    [/\bavis d['']imposition\b/gi, 'document de l'administration'],
+    [/\bavis d['']imposition\b/gi, "document de l'administration"],
     [/\bcomplémentaire santé\b/gi, 'mutuelle (complémentaire santé)'],
     [/\brevenu fiscal de référence\b/gi, 'revenu utilisé pour les aides'],
     [/\bnuméro fiscal\b/gi, 'identifiant impôts'],

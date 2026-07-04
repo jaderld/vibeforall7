@@ -18,13 +18,14 @@ const AI_STORAGE_KEYS = {
 const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
 const GEMINI_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
-const GEMINI_MODEL_PREFERENCES = [
-  'models/gemini-2.5-flash',
-  'models/gemini-2.0-flash',
-  'models/gemini-1.5-flash',
-  'models/gemini-1.5-pro',
-  'models/gemini-pro',
-] as const;
+const GEMINI_PRIMARY_MODEL = 'models/gemini-3.1-flash-lite';
+const GEMINI_MODELS_CACHE_TTL_MS = 10 * 60 * 1000;
+
+let geminiModelsCache: {
+  apiKey: string;
+  models: string[];
+  fetchedAt: number;
+} | null = null;
 
 // --------------------------------------------------------
 // TYPES ET INTERFACES (Pour satisfaire TypeScript)
@@ -170,8 +171,7 @@ async function callGemini(
 
   let lastError: Error | null = null;
 
-  const availableModels = await getGeminiGenerateContentModels(apiKey);
-  const modelCandidates = buildGeminiModelCandidates(availableModels);
+  const modelCandidates = [GEMINI_PRIMARY_MODEL];
 
   for (const model of modelCandidates) {
     try {
@@ -198,8 +198,7 @@ async function callGemini(
         }
 
         if (/model|not found|unsupported/i.test(message)) {
-          lastError = new Error(`Gemini (${model}) : ${message}`);
-          continue;
+          throw new Error(`Le modele Gemini configure (${model}) n'est pas disponible pour cette cle API. Utilisez une cle avec acces a ce modele.`);
         }
 
         throw new Error(message);
@@ -218,9 +217,7 @@ async function callGemini(
       return expectJson ? JSON.parse(extractJsonResponse(textResponse)) : textResponse;
     } catch (error: unknown) {
       lastError = error instanceof Error ? error : new Error(String(error));
-      if (!/model|not found|unsupported/i.test(lastError.message)) {
-        break;
-      }
+      break;
     }
   }
 
@@ -253,12 +250,23 @@ async function getGeminiGenerateContentModels(apiKey: string): Promise<string[]>
     .map((model) => model.name);
 }
 
-function buildGeminiModelCandidates(discoveredModels: string[]): string[] {
-  const discoveredSet = new Set(discoveredModels);
-  const orderedDiscovered = GEMINI_MODEL_PREFERENCES.filter((model) => discoveredSet.has(model));
-  const remainingDiscovered = discoveredModels.filter((model) => !orderedDiscovered.includes(model as (typeof GEMINI_MODEL_PREFERENCES)[number]));
+async function getGeminiGenerateContentModelsCached(apiKey: string): Promise<string[]> {
+  const now = Date.now();
+  if (
+    geminiModelsCache &&
+    geminiModelsCache.apiKey === apiKey &&
+    now - geminiModelsCache.fetchedAt < GEMINI_MODELS_CACHE_TTL_MS
+  ) {
+    return geminiModelsCache.models;
+  }
 
-  return [...orderedDiscovered, ...remainingDiscovered];
+  const models = await getGeminiGenerateContentModels(apiKey);
+  geminiModelsCache = {
+    apiKey,
+    models,
+    fetchedAt: now,
+  };
+  return models;
 }
 
 async function callAI(systemPrompt: string, userPrompt: string, expectJson: boolean = false): Promise<any> {

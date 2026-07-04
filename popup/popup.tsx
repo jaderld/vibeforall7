@@ -126,6 +126,9 @@ useEffect(() => {
 
   // Déclencheur manuel (au cas où l'automatique échoue)
   const analyzePageManually = () => {
+    if (isAnalyzing) {
+      return;
+    }
     setIsAnalyzing(true);
     setAnalysisError('');
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
@@ -380,6 +383,7 @@ useEffect(() => {
 
       <button
         onClick={analyzePageManually}
+        disabled={isAnalyzing}
         aria-label="Relancer l'analyse de la page"
         title="Relancer l'analyse"
         style={{
@@ -394,7 +398,8 @@ useEffect(() => {
           color: '#ffffff',
           fontSize: 18,
           fontWeight: 800,
-          cursor: 'pointer',
+          cursor: isAnalyzing ? 'not-allowed' : 'pointer',
+          opacity: isAnalyzing ? 0.7 : 1,
           boxShadow: '0 6px 16px rgba(15, 23, 42, 0.24)',
           zIndex: 1000,
         }}
