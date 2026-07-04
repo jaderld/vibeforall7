@@ -3,11 +3,10 @@
   "name": "FAILC",
   "description": "Rend les démarches administratives accessibles : simplification FALC, définitions, détection de formulaires.",
   "version": "1.0.0",
-  "permissions": ["activeTab", "storage", "contextMenus", "scripting"],
+  "permissions": ["activeTab", "storage", "contextMenus", "scripting", "sidePanel"],
   "host_permissions": ["http://127.0.0.1:8787/*", "http://localhost:8787/*"],
   "action": {
     "default_title": "FAILC",
-    "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.svg",
       "48": "icons/icon48.svg",
@@ -17,6 +16,9 @@
   "background": {
     "service_worker": "background/service-worker.js",
     "type": "module"
+  },
+  "side_panel": {
+    "default_path": "popup/popup.html"
   },
   "content_scripts": [
     {

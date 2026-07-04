@@ -7,7 +7,8 @@
     "activeTab",
     "storage",
     "contextMenus",
-    "scripting"
+    "scripting",
+    "sidePanel"
   ],
   "host_permissions": [
     "http://127.0.0.1:8787/*",
@@ -15,7 +16,6 @@
   ],
   "action": {
     "default_title": "FAILC",
-    "default_popup": "popup/popup.html",
     "default_icon": {
       "16": "icons/icon16.svg",
       "48": "icons/icon48.svg",
@@ -26,10 +26,13 @@
     "service_worker": "service-worker-loader.js",
     "type": "module"
   },
+  "side_panel": {
+    "default_path": "popup/popup.html"
+  },
   "content_scripts": [
     {
       "js": [
-        "assets/content-script.js-BOxPPzVh.js"
+        "assets/content-script.js-BYDc9apW.js"
       ],
       "matches": [
         "<all_urls>"
@@ -48,7 +51,7 @@
         "<all_urls>"
       ],
       "resources": [
-        "assets/content-script.js-BOxPPzVh.js"
+        "assets/content-script.js-BYDc9apW.js"
       ],
       "use_dynamic_url": false
     }

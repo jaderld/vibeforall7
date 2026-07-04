@@ -16,7 +16,6 @@ type AnalysisResponse = {
 
 const ADMIN_KEYWORDS = ['déclaration', 'cotisation', 'avis', 'impôt', 'caf', 'urssaf', 'allocation', 'sécurité sociale', 'démarche', 'complémentaire santé', 'impot', 'retraite', 'pension'];
 const STORAGE_PREFIX = 'failc:';
-const VOCAL_URL = 'https://example.com/vocal';
 const TERM_DEFINITIONS: Array<{ term: string; definition: string }> = [
   { term: 'avis d\'imposition', definition: 'Document envoyé par l’administration pour expliquer le montant de votre impôt.' },
   { term: 'cotisation', definition: 'Montant payé pour financer un service ou une assurance.' },
@@ -102,14 +101,17 @@ function ensureFloatingAssistant() {
   if (document.getElementById('failc-floating-panel')) return;
   const panel = document.createElement('div');
   panel.id = 'failc-floating-panel';
-  panel.style.cssText = `position:fixed;right:16px;bottom:16px;z-index:2147483647;width:min(320px, calc(100vw - 24px));max-height:70vh;overflow:auto;background:#ffffff;border:1px solid #cbd5e1;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.2);padding:12px;font-family:Arial,sans-serif;color:#111;`;
+  panel.style.cssText = `position:fixed;right:0;top:0;bottom:0;z-index:2147483647;width:min(380px, calc(100vw - 24px));overflow:auto;background:#f8fafc;border-left:1px solid #cbd5e1;box-shadow:-8px 0 40px rgba(15,23,42,0.15);padding:16px;font-family:Arial,sans-serif;color:#111;`;
   panel.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
       <strong style="font-size:15px;">FAILC Assistant</strong>
-      <button id="failc-floating-close" type="button" style="border:0;background:transparent;cursor:pointer;font-size:16px;">✕</button>
+      <div style="display:flex;gap:6px;">
+        <button id="failc-floating-collapse" type="button" style="border:0;background:#eff6ff;color:#0b5fff;border-radius:999px;padding:4px 8px;cursor:pointer;font-size:12px;">réduire</button>
+        <button id="failc-floating-close" type="button" style="border:0;background:transparent;cursor:pointer;font-size:16px;">✕</button>
+      </div>
     </div>
     <div id="failc-floating-body" style="font-size:13px;line-height:1.45;color:#334155;">
-      L’assistant reste visible sur cette page si la fenêtre popup se referme.
+      Ce panneau accompagne la page et propose une version plus simple des blocs administratifs.
     </div>
     <div style="display:flex;gap:8px;margin-top:10px;">
       <button id="failc-floating-analyze" type="button" style="flex:1;min-height:38px;border:0;border-radius:8px;background:#0b5fff;color:#fff;cursor:pointer;">Analyser</button>
@@ -117,6 +119,10 @@ function ensureFloatingAssistant() {
   `;
   document.body.appendChild(panel);
   panel.querySelector('#failc-floating-close')?.addEventListener('click', () => panel.remove());
+  panel.querySelector('#failc-floating-collapse')?.addEventListener('click', () => {
+    const body = document.getElementById('failc-floating-body');
+    if (body) body.style.display = body.style.display === 'none' ? '' : 'none';
+  });
   panel.querySelector('#failc-floating-analyze')?.addEventListener('click', () => {
     void analyzePage(true);
   });
@@ -130,6 +136,9 @@ function updateFloatingAssistant(data: AnalysisResponse | null) {
 
   const summary = data?.summary || 'Aucune analyse disponible pour le moment.';
   const steps = data?.steps?.slice(0, 3) || [];
+  const formNotice = data?.voiceFormAvailable
+    ? '<div style="margin-top:8px;padding:10px;border:1px solid #0b5fff;border-radius:10px;background:#eff6ff;color:#0f172a;">Formulaire détecté sur cette page.</div>'
+    : '';
   const contacts = [
     data?.contactInfo.telephone ? `📞 ${data.contactInfo.telephone}` : '',
     data?.contactInfo.email ? `✉️ ${data.contactInfo.email}` : '',
@@ -137,15 +146,20 @@ function updateFloatingAssistant(data: AnalysisResponse | null) {
   ].filter(Boolean);
 
   body.innerHTML = `
-    <div style="margin-bottom:8px;"><strong>Résumé</strong><div style="margin-top:4px;">${summary}</div></div>
-    ${steps.length ? `<div style="margin-bottom:8px;"><strong>À faire</strong><ul style="margin:4px 0 0 16px;padding:0;">${steps.map((step) => `<li>${step}</li>`).join('')}</ul></div>` : ''}
-    ${contacts.length ? `<div><strong>Coordonnées</strong><div style="margin-top:4px;">${contacts.join('<br/>')}</div></div>` : ''}
+    <div style="margin-bottom:10px;"><strong>Résumé</strong><div style="margin-top:6px;">${summary}</div></div>
+    ${formNotice}
+    ${steps.length ? `<div style="margin-bottom:10px;"><strong>À faire</strong><ul style="margin:6px 0 0 16px;padding:0;">${steps.map((step) => `<li>${step}</li>`).join('')}</ul></div>` : ''}
+    ${contacts.length ? `<div><strong>Coordonnées</strong><div style="margin-top:6px;">${contacts.join('<br/>')}</div></div>` : ''}
   `;
 }
 
 function setBadge(status: 'ok' | 'error') {
-  chrome.action.setBadgeText({ text: status === 'ok' ? '✓' : '!' });
-  chrome.action.setBadgeBackgroundColor({ color: status === 'ok' ? '#2e7d32' : '#c62828' });
+  // Content scripts may not have access to chrome.action in all contexts — delegate to background.
+  try {
+    chrome.runtime.sendMessage({ type: 'SET_BADGE', status });
+  } catch (e) {
+    // ignore
+  }
 }
 
 function showInlineNotice(message: string) {
@@ -160,28 +174,26 @@ function showInlineNotice(message: string) {
 }
 
 function showAccessibilityGuide(data: AnalysisResponse) {
-  const existing = document.getElementById('failc-guide-banner');
-  if (existing) existing.remove();
-  const banner = document.createElement('div');
-  banner.id = 'failc-guide-banner';
-  banner.style.cssText = `position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#0f172a;color:#fff;padding:12px 14px;box-shadow:0 6px 18px rgba(0,0,0,0.2);font-family:Arial,sans-serif;display:flex;flex-direction:column;gap:8px;`;
-  banner.innerHTML = `
-    <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
-      <div>
-        <strong style="font-size:15px;">Guide FAILC</strong>
-        <div style="font-size:13px;margin-top:4px;line-height:1.45;">${escapeHtml(data.summary)}</div>
-      </div>
-      <button id="failc-guide-close" type="button" style="border:0;background:transparent;color:#fff;cursor:pointer;font-size:16px;">✕</button>
-    </div>
-    <div style="font-size:13px;line-height:1.45;">${data.steps.map((step) => `<div>• ${escapeHtml(step)}</div>`).join('')}</div>
-  `;
-  document.body.appendChild(banner);
-  document.getElementById('failc-guide-close')?.addEventListener('click', () => banner.remove());
-  document.body.style.paddingTop = '110px';
+  ensureFloatingAssistant();
+  updateFloatingAssistant(data);
+}
+
+function applyAccessibilityProfile(profile: Profile) {
+  activeProfile = profile;
+  applyProfileStyles(profile);
+  chrome.storage.local.set({ failcProfile: profile });
+  const bannerMessage = profile === 'dyslexia'
+    ? 'Police adaptée et espacement amélioré.'
+    : profile === 'low-vision'
+      ? 'Contraste et taille de texte renforcés.'
+      : profile === 'anti-epilepsy'
+        ? 'Animations et transitions désactivées.'
+        : 'Profil standard appliqué.';
+  showInlineNotice(bannerMessage);
 }
 
 function collectBlocks() {
-  const selector = 'p, li, td, h1, h2, h3, h4, h5, h6, div, span, section, article, label, strong';
+  const selector = 'p, li, td, h1, h2, h3, h4, h5, h6, label';
   const elements = Array.from(document.querySelectorAll(selector));
   const blocks: Array<{ id: string; text: string; html: string; tagName: string }> = [];
   elements.forEach((element) => {
@@ -189,7 +201,7 @@ function collectBlocks() {
     if (element.closest('script, style, noscript, svg, form, button, input, textarea, select, iframe')) return;
     const text = element.innerText?.trim() || element.textContent?.trim() || '';
     const isVisible = element.getClientRects().length > 0 || element.tagName === 'BODY' || element.tagName === 'HTML';
-    if (!text || text.length < 6 || !isVisible) return;
+    if (!text || text.length < 12 || !isVisible) return;
     const id = `failc-${Math.random().toString(36).slice(2, 10)}`;
     element.setAttribute('data-failc-id', id);
     blocks.push({ id, text, html: element.outerHTML.slice(0, 2400), tagName: element.tagName.toLowerCase() });
@@ -207,11 +219,12 @@ function escapeHtml(value: string): string {
 }
 
 function simplifyText(text: string, html = ''): string {
-  let simplified = text.replace(/\s+/g, ' ').trim();
-  if (!simplified) return 'Informations à consulter.';
+  let normalized = `${text || ''}`.replace(/\s+/g, ' ').trim();
+  if (!normalized) return 'Informations à consulter.';
 
-  const combined = `${simplified} ${html}`.toLowerCase();
+  const combined = `${normalized} ${html}`.toLowerCase();
   const guidance: string[] = [];
+
   if (/(déclar|imp[oô]t|taxe|revenu|fisc)/i.test(combined)) {
     guidance.push('Vous devez remplir un formulaire ou vérifier un document fiscal.');
   }
@@ -237,15 +250,14 @@ function simplifyText(text: string, html = ''): string {
     [/\bsécurité sociale\b/gi, 'protection sociale'],
     [/\bdémarche\b/gi, 'action administrative'],
     [/\bformulaire\b/gi, 'formulaire simple'],
-    [/\bdocuments?\b/gi, 'pièces à fournir'],
-    [/\bprévoir\b/gi, 'préparer']
+    [/\bdocuments?\b/gi, 'pièces à fournir']
   ];
 
   replacements.forEach(([pattern, replacement]) => {
-    simplified = simplified.replace(pattern, replacement);
+    normalized = normalized.replace(pattern, replacement);
   });
 
-  const finalText = `${simplified}${guidance.length ? ` ${guidance.join(' ')}` : ''}`.trim();
+  const finalText = `${normalized}${guidance.length ? ` ${guidance.join(' ')}` : ''}`.trim();
   return finalText.length > 220 ? `${finalText.slice(0, 217).trimEnd()}…` : finalText;
 }
 
@@ -276,72 +288,86 @@ function analyzeLocally(blocks: Array<{ id: string; text: string; html: string; 
   const visibleText = blocks.map((block) => block.text).join(' ');
   const glossary = buildGlossary(visibleText);
   const contactInfo = extractContactInfo(visibleText);
+
   const lowerText = visibleText.toLowerCase();
-  const topic = /déclar|imp[oô]t|revenu|fisc|taxe/.test(lowerText)
-    ? 'une démarche fiscale ou administrative'
-    : /paiement|cotisation|montant/.test(lowerText)
-      ? 'un paiement ou une cotisation'
-      : /document|pièce|justificatif/.test(lowerText)
-        ? 'la préparation de documents'
-        : 'une démarche administrative';
-  const action = /déclar|imp[oô]t|revenu|taxe/.test(lowerText)
-    ? 'Rassemblez les documents demandés et remplissez le formulaire avec les informations exactes.'
-    : /paiement|cotisation|montant/.test(lowerText)
-      ? 'Vérifiez le montant et les moyens de paiement proposés.'
-      : 'Repérez les étapes principales et les coordonnées utiles.';
-  const summary = visibleText.length > 0
-    ? `Cette page concerne ${topic}. ${action}`
-    : 'Cette page ne contient pas assez de contenu pour générer un résumé.';
-  const steps = [
-    'Repérez la rubrique principale et les actions demandées.',
-    'Préparez les pièces justificatives ou informations utiles.',
-    'Suivez les étapes affichées et gardez les coordonnées à portée de main.'
-  ];
+  // Detect page type and intents
+  const isTax = /déclar|imp[oô]t|revenu|fisc|taxe/.test(lowerText);
+  const isPayment = /paiement|cotisation|montant|versement|facture/.test(lowerText);
+  const isDocumentPrep = /document|pièce|justificatif|dossier|télécharger|téléverse|téléverser/.test(lowerText);
+  const isForm = document.querySelectorAll('form').length > 0;
+
+  // Extract headings and form labels to make the summary specific
+  const headings = Array.from(document.querySelectorAll('h1, h2, h3')).map(h => (h.textContent || '').trim()).filter(Boolean);
+  const firstHeading = headings[0] || document.title || '';
+
+  const formLabels = Array.from(document.querySelectorAll('label')).map(l => (l.textContent || '').trim()).filter(Boolean).slice(0, 12);
+
+  // Find dates and amounts
+  const dateMatches = visibleText.match(/\b\d{1,2}\s?(janvier|février|mars|avril|mai|juin|juillet|août|septembre|octobre|novembre|décembre)\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b/gi) || [];
+  const amountMatches = visibleText.match(/\b\d+[\s\d,.]*€\b/g) || [];
+
+  // Build a focused summary
+  let summaryParts: string[] = [];
+  if (firstHeading) summaryParts.push(`Titre principal : ${firstHeading}.`);
+  if (isTax) summaryParts.push('Sujet principal : démarche fiscale / impôts.');
+  if (isPayment) summaryParts.push('Cette page traite d’un paiement ou d’une cotisation.');
+  if (isDocumentPrep) summaryParts.push('La page demande de préparer des documents ou justificatifs.');
+  if (isForm) summaryParts.push('Il y a un formulaire à compléter sur cette page.');
+  if (formLabels.length) summaryParts.push(`Champs visibles : ${formLabels.slice(0,6).join(', ')}${formLabels.length>6?'...':''}.`);
+  if (amountMatches.length) summaryParts.push(`Montants repérés : ${amountMatches.slice(0,3).join(', ')}.`);
+  if (dateMatches.length) summaryParts.push(`Dates ou délais repérés : ${dateMatches.slice(0,3).join(', ')}.`);
+
+  const whatToDo: string[] = [];
+  if (isForm) whatToDo.push('Remplir le formulaire en suivant l’ordre des champs.');
+  if (isDocumentPrep) whatToDo.push('Préparer les pièces justificatives demandées (pièce d’identité, justificatif de domicile, avis, etc.).');
+  if (isPayment) whatToDo.push('Vérifier le montant indiqué et préparer un moyen de paiement sécurisé.');
+  if (!whatToDo.length) whatToDo.push('Repérez les actions principales et suivez les étapes indiquées.');
+
+  const summary = summaryParts.length ? `${summaryParts.join(' ')} Ce qu’il faut faire : ${whatToDo.join(' ')}` : 'Cette page semble contenir des informations administratives ; suivez les instructions affichées et préparez les pièces demandées.';
+
+  // Build actionable steps, short and accessible
+  const steps = [] as string[];
+  if (firstHeading) steps.push(`Vérifier la rubrique : ${firstHeading}.`);
+  if (formLabels.length) steps.push(`Remplir les champs importants comme : ${formLabels.slice(0,3).join(', ')}.`);
+  if (dateMatches.length) steps.push(`Respecter les dates indiquées : ${dateMatches[0]}.`);
+  if (amountMatches.length) steps.push(`Vérifier les montants (${amountMatches.slice(0,2).join(', ')}).`);
+  steps.push('Préparez les pièces demandées et suivez l’ordre indiqué.');
+
   const highlightedSelectors = ['form', 'button', 'input', 'a'];
+
   return {
     simplifiedBlocks: blocks.map((block) => ({ id: block.id, falc: simplifyText(block.text, block.html) })),
     glossary,
     contactInfo,
-    voiceFormAvailable: document.querySelectorAll('form').length > 0,
+    voiceFormAvailable: isForm,
     summary,
     steps,
     highlightedSelectors
   };
 }
 
-async function getConfiguredApiUrl(): Promise<string> {
-  return new Promise((resolve) => {
-    chrome.storage.local.get(['failcApiUrl'], (result) => {
-      const value = typeof result.failcApiUrl === 'string' ? result.failcApiUrl : '';
-      resolve((value || 'http://127.0.0.1:8787').replace(/\/$/, ''));
-    });
-  });
-}
-
 async function fetchAnalysis(blocks: Array<{ id: string; text: string; html: string; tagName: string }>): Promise<AnalysisResponse> {
-  const apiUrl = await getConfiguredApiUrl();
-  if (apiUrl) {
+  // Delegate network request to the background service worker to avoid CORS and private-network restrictions.
+  return new Promise<AnalysisResponse>((resolve) => {
     try {
-      const response = await fetch(`${apiUrl}/api/analyze-page`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          url: location.href,
-          title: document.title,
-          html: document.body?.innerHTML || '',
-          blocks,
-          hasForm: document.querySelectorAll('form').length > 0
-        })
+      chrome.runtime.sendMessage({ type: 'FETCH_ANALYSIS', payload: { url: location.href, title: document.title, html: document.body?.innerHTML || '', blocks, hasForm: document.querySelectorAll('form').length > 0 } }, (response) => {
+        // If the message channel closed or an error occurred, chrome.runtime.lastError will be set.
+        if (chrome.runtime.lastError) {
+          // Fallback to local analysis to avoid unhandled promise / console error when sender or background is reloaded/closed.
+          resolve(analyzeLocally(blocks));
+          return;
+        }
+        if (response && (response as any).simplifiedBlocks) {
+          resolve(response as AnalysisResponse);
+        } else {
+          // background returned nothing — fallback to local analysis
+          resolve(analyzeLocally(blocks));
+        }
       });
-      if (response.ok) {
-        const data = await response.json() as AnalysisResponse;
-        return data;
-      }
-    } catch (error) {
-      // fallback local analysis below
+    } catch (e) {
+      resolve(analyzeLocally(blocks));
     }
-  }
-  return analyzeLocally(blocks);
+  });
 }
 
 async function analyzePage(force = false) {
@@ -352,23 +378,12 @@ async function analyzePage(force = false) {
   try {
     const data = await fetchAnalysis(blocks);
     showAccessibilityGuide(data);
-    data.simplifiedBlocks.forEach((block) => {
-      const target = document.querySelector(`[data-failc-id="${block.id}"]`) as HTMLElement | null;
-      if (target) {
-        target.innerHTML = `<div style="background:#f8fafc;border-left:4px solid #0b5fff;padding:8px 10px;border-radius:6px;line-height:1.45;font-size:15px;color:#0f172a;">${escapeHtml(block.falc)}</div>`;
-        target.setAttribute('data-failc-rewritten', 'true');
-        target.style.setProperty('background', 'transparent', 'important');
-      }
-    });
     updateFloatingAssistant(data);
     const storageKey = `${STORAGE_PREFIX}${location.href}`;
     await chrome.storage.local.set({ [storageKey]: { glossary: data.glossary, contactInfo: data.contactInfo, voiceFormAvailable: data.voiceFormAvailable } });
     applyGlossaryHighlights(data.glossary);
     attachGlossaryInteractions();
     setBadge('ok');
-    if (data.voiceFormAvailable) {
-      showVoiceBanner();
-    }
   } catch (error) {
     setBadge('error');
     showInlineNotice('Analyse indisponible, réessayez');
@@ -406,28 +421,6 @@ function applyGlossaryHighlights(glossary: GlossaryEntry[]) {
       const fragment = document.createRange().createContextualFragment(updated);
       node.parentNode?.replaceChild(fragment, node);
     }
-  });
-}
-
-function showVoiceBanner() {
-  chrome.storage.local.get([`failc:voice-dismiss:${location.href}`], (result) => {
-    if (result[`failc:voice-dismiss:${location.href}`]) return;
-    const existing = document.getElementById('failc-voice-banner');
-    if (existing) return;
-    const banner = document.createElement('div');
-    banner.id = 'failc-voice-banner';
-    banner.className = 'failc-banner';
-    banner.innerHTML = `<span>FAILC a détecté un formulaire sur cette page — voulez-vous le remplir à la voix ?</span><div style="display:flex;gap:8px;"><button id="failc-voice-yes" style="min-height:44px;border:1px solid #fff;border-radius:6px;padding:0 12px;background:#fff;color:#102a43;cursor:pointer;">Oui, m'aider</button><button id="failc-voice-no" style="min-height:44px;border:1px solid #fff;border-radius:6px;padding:0 12px;background:transparent;color:#fff;cursor:pointer;">Non merci</button></div>`;
-    document.body.prepend(banner);
-    document.body.style.paddingTop = '56px';
-    const yes = document.getElementById('failc-voice-yes');
-    const no = document.getElementById('failc-voice-no');
-    yes?.addEventListener('click', () => chrome.tabs.create({ url: VOCAL_URL }));
-    no?.addEventListener('click', () => {
-      banner.remove();
-      document.body.style.paddingTop = '';
-      chrome.storage.local.set({ [`failc:voice-dismiss:${location.href}`]: true });
-    });
   });
 }
 
