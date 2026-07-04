@@ -630,15 +630,25 @@ function init() {
   startDomObserver();
 
   if (!isSupportedSite()) return;
+
+  // Apply simplification immediately so users don't need to click in the popup.
+  applyVisualModifications();
+  refreshContactLinkIfNeeded();
+
   chrome.storage.local.get(['failcProfile'], (result) => {
     activeProfile = (result.failcProfile as Profile) || 'standard';
     applyProfileStyles(activeProfile);
   });
 
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'SET_PROFILE') {
       activeProfile = message.profile;
       applyProfileStyles(activeProfile);
+      applyVisualModifications();
+    }
+    if (message.type === 'EXTRACT_PAGE_CONTENT') {
+      sendResponse({ pageContent: extractPageContent() });
+      return false;
     }
     if (message.type === 'ANALYZE_PAGE') {
       void analyzePageSilent();
