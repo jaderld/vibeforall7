@@ -395,20 +395,9 @@ useEffect(() => {
         ↻
       </button>
 
-      {/* Si l'analyse est absente (ex: erreur auto) */}
-      {!isAnalyzing && !analysis && (
-        <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-          <p style={{ margin: 0, fontSize: 14, color: '#475569', lineHeight: 1.4 }}>Aucune analyse disponible pour cette page.</p>
-        </div>
-      )}
-
       {/* RÉSULTATS DE L'ANALYSE */}
       {!isAnalyzing && analysis && (
         <div style={{ padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 16 }}>
-
-          <div style={{ margin: '0 0 12px', fontSize: 12, color: '#16a34a', fontWeight: 700 }}>
-            Simplification visuelle active automatiquement.
-          </div>
           
           <h3 style={{ margin: '0 0 8px', fontSize: 16, color: '#0f172a' }}>Résumé de la page</h3>
           <p style={{ margin: '0 0 16px', fontSize: 14, lineHeight: 1.5, color: '#334155' }}>{analysis.summary}</p>
@@ -468,12 +457,6 @@ useEffect(() => {
               </div>
             </div>
           )}
-
-          <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button onClick={analyzePageManually} disabled={isAnalyzing} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
-              Relancer l'analyse IA
-            </button>
-          </div>
         </div>
       )}
 
