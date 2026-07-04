@@ -31,6 +31,11 @@ const AI_STORAGE_KEYS = {
   settingsDone: 'failcAiSettingsDone',
 } as const;
 
+const PROFILE_STORAGE_KEYS = {
+  profile: 'failcProfile',
+  settingsDone: 'failcProfileSettingsDone',
+} as const;
+
 const Popup = () => {
   const [activeProfile, setActiveProfile] = useState<Profile>('standard');
   const [aiProvider, setAiProvider] = useState<AIProvider>('openai');
@@ -38,6 +43,9 @@ const Popup = () => {
   const [geminiApiKey, setGeminiApiKey] = useState<string>('');
   const [aiStatus, setAiStatus] = useState<string>('');
   const [showAiSettings, setShowAiSettings] = useState<boolean>(true);
+  const [showProfileSettings, setShowProfileSettings] = useState<boolean>(true);
+  const [showSettingsChooser, setShowSettingsChooser] = useState<boolean>(false);
+  const [profileStatus, setProfileStatus] = useState<string>('');
   const [analysis, setAnalysis] = useState<AnalysisData | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
   const [hasModifiedPage, setHasModifiedPage] = useState<boolean>(false);
@@ -60,8 +68,9 @@ useEffect(() => {
     chrome.runtime.onMessage.addListener(messageListener);
 
     // 2. Initialisation : chargement du profil
-    chrome.storage.local.get(['failcProfile'], (result) => {
-      setActiveProfile((result.failcProfile as Profile) || 'standard');
+    chrome.storage.local.get([PROFILE_STORAGE_KEYS.profile, PROFILE_STORAGE_KEYS.settingsDone], (result) => {
+      setActiveProfile((result[PROFILE_STORAGE_KEYS.profile] as Profile) || 'standard');
+      setShowProfileSettings(!Boolean(result[PROFILE_STORAGE_KEYS.settingsDone]));
     });
 
     chrome.storage.local.get(
@@ -126,9 +135,17 @@ useEffect(() => {
 
   const applyProfile = (profile: Profile) => {
     setActiveProfile(profile);
-    chrome.storage.local.set({ failcProfile: profile });
+    chrome.storage.local.set({ [PROFILE_STORAGE_KEYS.profile]: profile });
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) chrome.tabs.sendMessage(tabs[0].id, { type: 'SET_PROFILE', profile }).catch(() => {});
+    });
+  };
+
+  const saveProfileSettings = () => {
+    chrome.storage.local.set({ [PROFILE_STORAGE_KEYS.settingsDone]: true }, () => {
+      setShowProfileSettings(false);
+      setProfileStatus('Profil d\'affichage enregistré.');
+      window.setTimeout(() => setProfileStatus(''), 2500);
     });
   };
 
@@ -152,6 +169,20 @@ useEffect(() => {
     });
   };
 
+  const openProfileSettingsFromChooser = () => {
+    setShowProfileSettings(true);
+    setShowAiSettings(false);
+    setShowSettingsChooser(false);
+    setAiStatus('');
+  };
+
+  const openAiSettingsFromChooser = () => {
+    setShowAiSettings(true);
+    setShowProfileSettings(false);
+    setShowSettingsChooser(false);
+    setProfileStatus('');
+  };
+
   const triggerPageModifications = () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
@@ -173,25 +204,40 @@ useEffect(() => {
       </div>
 
       {/* Profils d'affichage */}
-      <div style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginBottom: 8 }}>Profils d'affichage (Visuel)</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          {profiles.map((profile) => (
-            <button
-              key={profile.id}
-              onClick={() => applyProfile(profile.id)}
-              style={{
-                minHeight: 40, border: activeProfile === profile.id ? '2px solid #0b5fff' : '1px solid #cbd5e1',
-                borderRadius: 8, background: activeProfile === profile.id ? '#eff6ff' : '#ffffff',
-                color: activeProfile === profile.id ? '#0b5fff' : '#475569', cursor: 'pointer',
-                fontSize: 13, fontWeight: activeProfile === profile.id ? 700 : 500
-              }}
-            >
-              {profile.label}
-            </button>
-          ))}
+      {showProfileSettings && (
+        <div style={{ marginBottom: 16, padding: 16, background: '#ffffff', borderRadius: 12, border: '1px solid #e2e8f0' }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: '#1e293b', marginBottom: 8 }}>Profils d'affichage (Visuel)</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            {profiles.map((profile) => (
+              <button
+                key={profile.id}
+                onClick={() => applyProfile(profile.id)}
+                style={{
+                  minHeight: 40, border: activeProfile === profile.id ? '2px solid #0b5fff' : '1px solid #cbd5e1',
+                  borderRadius: 8, background: activeProfile === profile.id ? '#eff6ff' : '#ffffff',
+                  color: activeProfile === profile.id ? '#0b5fff' : '#475569', cursor: 'pointer',
+                  fontSize: 13, fontWeight: activeProfile === profile.id ? 700 : 500
+                }}
+              >
+                {profile.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={saveProfileSettings}
+            style={{ width: '100%', padding: '12px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', marginTop: 12 }}
+          >
+            Valider ce profil
+          </button>
+
+          {profileStatus && (
+            <div style={{ marginTop: 10, fontSize: 12, color: '#16a34a', fontWeight: 700 }}>
+              {profileStatus}
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       {/* Choix du moteur IA */}
       {showAiSettings && (
@@ -253,6 +299,62 @@ useEffect(() => {
               {aiStatus}
             </div>
           )}
+        </div>
+      )}
+
+      {showSettingsChooser && (
+        <div
+          style={{
+            position: 'fixed',
+            right: 12,
+            bottom: 56,
+            width: 230,
+            background: '#ffffff',
+            borderRadius: 12,
+            border: '1px solid #e2e8f0',
+            boxShadow: '0 14px 30px rgba(15, 23, 42, 0.22)',
+            padding: 10,
+            zIndex: 1000,
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              right: 20,
+              bottom: -8,
+              width: 14,
+              height: 14,
+              background: '#ffffff',
+              borderRight: '1px solid #e2e8f0',
+              borderBottom: '1px solid #e2e8f0',
+              transform: 'rotate(45deg)',
+            }}
+          />
+
+          <div style={{ fontSize: 12, fontWeight: 800, color: '#334155', marginBottom: 8 }}>
+            Ouvrir les settings
+          </div>
+
+          <button
+            onClick={openProfileSettingsFromChooser}
+            style={{ width: '100%', padding: '9px', background: '#0b5fff', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', marginBottom: 6, fontSize: 12 }}
+          >
+            Profil d'affichage
+          </button>
+
+          <button
+            onClick={openAiSettingsFromChooser}
+            style={{ width: '100%', padding: '9px', background: '#0f172a', color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', marginBottom: 6, fontSize: 12 }}
+          >
+            Moteur IA
+          </button>
+
+          <button
+            onClick={() => setShowSettingsChooser(false)}
+            style={{ width: '100%', padding: '8px', background: '#e2e8f0', color: '#334155', border: 'none', borderRadius: 8, fontWeight: 700, cursor: 'pointer', fontSize: 12 }}
+          >
+            Fermer
+          </button>
         </div>
       )}
 
@@ -347,8 +449,7 @@ useEffect(() => {
 
       <button
         onClick={() => {
-          setShowAiSettings(true);
-          setAiStatus('');
+          setShowSettingsChooser(true);
         }}
         style={{
           position: 'fixed',
