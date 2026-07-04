@@ -645,11 +645,12 @@ function init() {
 
   if (!isSupportedSite()) return;
 
-  // Application immédiate de la simplification et de la détection de contact,
-  // pour que la page soit adaptée sans que l'utilisateur ait besoin de cliquer
-  // sur un bouton dans le popup.
+  // Application immédiate de la simplification, de la détection de contact
+  // et de l'analyse IA (résumé), pour que tout soit prêt sans que l'utilisateur
+  // ait besoin de cliquer sur un bouton dans le popup.
   applyVisualModifications();
   refreshContactLinkIfNeeded();
+  void analyzePageSilent();
 
   chrome.storage.local.get(['failcProfile'], (result) => {
     activeProfile = (result.failcProfile as Profile) || 'standard';

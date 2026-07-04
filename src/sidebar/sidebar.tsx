@@ -149,18 +149,10 @@ const Popup = () => {
   };
 
   const saveProfileSettings = () => {
-    chrome.storage.local.get([PROFILE_STORAGE_KEYS.settingsDone], (result) => {
-      const wasFirstChoice = !Boolean(result[PROFILE_STORAGE_KEYS.settingsDone]);
-
-      chrome.storage.local.set({ [PROFILE_STORAGE_KEYS.settingsDone]: true }, () => {
-        setShowProfileSettings(false);
-        setProfileStatus('Profil d\'affichage enregistré.');
-        window.setTimeout(() => setProfileStatus(''), 2500);
-
-        if (wasFirstChoice) {
-          analyzePageManually();
-        }
-      });
+    chrome.storage.local.set({ [PROFILE_STORAGE_KEYS.settingsDone]: true }, () => {
+      setShowProfileSettings(false);
+      setProfileStatus('Profil d\'affichage enregistré.');
+      window.setTimeout(() => setProfileStatus(''), 2500);
     });
   };
 
@@ -465,11 +457,6 @@ const Popup = () => {
             </div>
           )}
 
-          <div style={{ textAlign: 'center', marginTop: 16 }}>
-            <button onClick={analyzePageManually} disabled={isAnalyzing} style={{ background: 'none', border: 'none', color: '#64748b', fontSize: 12, textDecoration: 'underline', cursor: 'pointer' }}>
-              Relancer l'analyse IA
-            </button>
-          </div>
         </div>
       )}
 
