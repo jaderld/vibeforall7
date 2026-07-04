@@ -172,8 +172,8 @@ useEffect(() => {
 
     chrome.storage.local.set({
       [AI_STORAGE_KEYS.provider]: aiProvider,
-      [AI_STORAGE_KEYS.openaiKey]: openAiApiKey.trim(),
-      [AI_STORAGE_KEYS.geminiKey]: geminiApiKey.trim(),
+      [AI_STORAGE_KEYS.openaiKey]: aiProvider === 'openai' ? openAiApiKey.trim() : '',
+      [AI_STORAGE_KEYS.geminiKey]: aiProvider === 'gemini' ? geminiApiKey.trim() : '',
       [AI_STORAGE_KEYS.settingsDone]: true,
     }, () => {
       setAiStatus('Paramètres IA enregistrés.');
