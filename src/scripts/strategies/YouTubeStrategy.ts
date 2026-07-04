@@ -21,10 +21,6 @@ export class YouTubeStrategy implements IContentStrategy {
   }
 
   async getContent(_tabId: number, url: string): Promise<ContentPart> {
-    return {
-      type: 'file_data',
-      mimeType: 'video/mp4',
-      fileUri: url,
-    };
+    return { type: 'text', text: `Video URL: ${url}` };
   }
 }
