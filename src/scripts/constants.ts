@@ -16,3 +16,15 @@ export const NOISE_SELECTORS = [
   '#sidebar',
   '.cookie-consent',
 ];
+
+// --------------------------------------------------------
+// Chatbot contextuel (sidebar)
+// --------------------------------------------------------
+
+// Nombre d'échanges précédents renvoyés à l'IA pour garder la mémoire
+// de la conversation, sans faire exploser la taille du prompt.
+export const CHAT_HISTORY_LIMIT = 8;
+
+// Préfixe de clé utilisé pour stocker l'historique de chat par page
+// dans chrome.storage.local (une entrée par URL nettoyée).
+export const CHAT_STORAGE_PREFIX = 'failc:chat:';

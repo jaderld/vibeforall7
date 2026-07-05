@@ -1,4 +1,6 @@
 import { extractPageContent } from './webExtraction';
+import { detectForms } from './services/FormDetectionService';
+import { fillField, highlightField, clearFieldHighlight, submitOrAdvance } from './services/FormFillingService';
 
 type Profile = 'standard' | 'dyslexia' | 'low-vision' | 'anti-epilepsy';
 type ContactInfo = {
@@ -9,13 +11,15 @@ type ContactInfo = {
   adresse?: string;
   horaires?: string;
 };
+type GlossaryEntry = { term: string; definition: string };
+type TextReplacement = { original: string; replacement: string };
 type StorageData = {
   contactInfo?: ContactInfo;
   [key: string]: any;
 };
 
 const STORAGE_PREFIX = 'failc:';
-const TERM_DEFINITIONS: Array<{ term: string; definition: string }> = [
+const TERM_DEFINITIONS: GlossaryEntry[] = [
   { term: 'avis d\'imposition', definition: 'Document envoyé par l’administration pour expliquer le montant de votre impôt.' },
   { term: 'cotisation', definition: 'Montant payé pour financer un service ou une assurance.' },
   { term: 'complémentaire santé', definition: 'Garantie qui complète la couverture de base pour les soins médicaux.' },
@@ -298,6 +302,14 @@ function resetAntiEpilepsyRuntime() {
   restoreAutoplayMedia();
 }
 
+// Données de simplification proposées par l'IA (voir BackgroundController / FETCH_ANALYSIS).
+// Vides par défaut : dans ce cas, applyVisualModifications() s'appuie uniquement sur les
+// règles statiques ci-dessous, qui restent TOUJOURS actives comme filet de sécurité —
+// même quand l'IA répond, pour couvrir ce qu'elle n'aurait pas détecté.
+let aiReplacements: TextReplacement[] = [];
+let aiGlossary: GlossaryEntry[] = [];
+let aiUiLabels: TextReplacement[] = [];
+
 // ==========================================
 // 1. GESTION DES PROFILS (CSS)
 // ==========================================
@@ -440,71 +452,89 @@ function collectBlocks() {
   return blocks.slice(0, 60);
 }
 
-// Mots-clés désignant un accès au contact/support/prise de rendez-vous
-const CONTACT_KEYWORDS = [
+// Mots-clés désignant un accès au contact/support/prise de rendez-vous.
+// On priorise les mots-clés "forts" (sans ambiguïté) avant les mots-clés "faibles"
+// (aide/FAQ/support peuvent aussi désigner autre chose qu'un contact direct).
+const STRONG_CONTACT_KEYWORDS = [
   'contact', 'contactez', 'nous contacter', 'nous joindre',
-  'aide', 'faq', 'support', 'assistance',
   'rendez-vous', 'rendezvous', 'rdv', 'prendre rendez-vous'
 ];
 
-// Cherche le lien/bouton de contact sur la page et renvoie son libellé + son URL
-// Cherche le premier lien/bouton de contact sur la page et renvoie son libellé + son URL
+const WEAK_CONTACT_KEYWORDS = [
+  'aide', 'faq', 'support', 'assistance'
+];
+
+// Cherche le lien/bouton de contact sur la page et renvoie son libellé + son URL.
+// On cherche d'abord avec les mots-clés forts, puis on retombe sur les faibles.
 function findContactLink(): { label: string; url: string } | null {
-  const candidates = Array.from(document.querySelectorAll('a, button'));
+  const candidates = Array.from(document.querySelectorAll('a, button, [role="button"]'));
 
-  for (const el of candidates) {
-    if (!(el instanceof HTMLElement)) continue;
+  const searchWithKeywords = (keywords: string[]): { label: string; url: string } | null => {
+    for (const el of candidates) {
+      if (!(el instanceof HTMLElement)) continue;
 
-    // On exclut les éléments manifestement cachés à l'écran
-    const style = window.getComputedStyle(el);
-    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+      // On exclut les éléments manifestement cachés à l'écran
+      const style = window.getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
 
-    const rawText =
-      el.innerText?.trim() ||
-      el.getAttribute('aria-label') ||
-      el.textContent?.trim() ||
-      '';
+      const rawText =
+        el.innerText?.trim() ||
+        el.getAttribute('aria-label') ||
+        el.textContent?.trim() ||
+        '';
 
-    const text = normalize(rawText);
-    if (!text) continue;
+      const text = normalize(rawText);
+      if (!text || text.length > 60) continue;
 
-    const matched = CONTACT_KEYWORDS.some((kw) => text.includes(kw));
-    if (!matched) continue;
+      const matched = keywords.some((kw) => text.includes(kw));
+      if (!matched) continue;
 
-    // On récupère le lien brut (dans le HTML) ET l'URL absolue résolue par le navigateur
-    const rawHref = el.getAttribute('href') || '';
-    const url = (el as HTMLAnchorElement).href || rawHref;
-    
-    // FILTRE 1 : On ignore directement les ancres brutes, la racine ou le JS
-    if (
-      !url || 
-      rawHref === '#' || 
-      rawHref === '/' || 
-      rawHref.startsWith('#') || 
-      rawHref.startsWith('javascript:')
-    ) {
-      continue;
-    }
+      // On récupère le lien brut (dans le HTML) ET l'URL absolue résolue par le navigateur
+      const rawHref = el.getAttribute('href') || '';
+      const url = (el as HTMLAnchorElement).href || rawHref;
 
-    // FILTRE 2 : On ignore les "tabs" (liens pointant vers la même page avec une ancre #)
-    try {
-      const parsedUrl = new URL(url, window.location.href);
-      const currentUrl = new URL(window.location.href);
-      
-      // Si l'URL a le même chemin d'accès que la page actuelle et possède un "#", on ignore
-      if (parsedUrl.pathname === currentUrl.pathname && parsedUrl.hash) {
-        continue;
+      // Les <button>/[role="button"] n'ont pas forcément de href exploitable
+      // (souvent pilotés par du JS) : on ne leur applique pas les mêmes filtres
+      // qu'à un vrai lien <a>.
+      const isButton = el.tagName.toLowerCase() === 'button' || el.getAttribute('role') === 'button';
+
+      if (!isButton) {
+        // FILTRE 1 : On ignore directement les ancres brutes, la racine ou le JS
+        if (
+          !url ||
+          rawHref === '#' ||
+          rawHref === '/' ||
+          rawHref.startsWith('#') ||
+          rawHref.startsWith('javascript:')
+        ) {
+          continue;
+        }
+
+        // FILTRE 2 : On ignore les "tabs" (liens pointant vers la même page avec une ancre #)
+        try {
+          const parsedUrl = new URL(url, window.location.href);
+          const currentUrl = new URL(window.location.href);
+
+          // Si l'URL a le même chemin d'accès que la page actuelle et possède un "#", on ignore
+          if (parsedUrl.pathname === currentUrl.pathname && parsedUrl.hash) {
+            continue;
+          }
+        } catch (e) {
+          // Si l'URL est mal formée, on l'ignore
+          continue;
+        }
       }
-    } catch (e) {
-      // Si l'URL est mal formée, on l'ignore
-      continue;
+
+      // Si on arrive ici, c'est un vrai lien vers une AUTRE page (ou un bouton exploitable)
+      return { label: rawText, url: url || '#' };
     }
+    return null;
+  };
 
-    // Si on arrive ici, c'est un vrai lien vers une AUTRE page (la vraie page de contact)
-    return { label: rawText, url };
-  }
+  const strongMatch = searchWithKeywords(STRONG_CONTACT_KEYWORDS);
+  if (strongMatch) return strongMatch;
 
-  return null;
+  return searchWithKeywords(WEAK_CONTACT_KEYWORDS);
 }
 
 // Extrait les coordonnées directement depuis le texte brut
@@ -530,6 +560,45 @@ function extractContactInfo(text: string): Partial<ContactInfo> {
   return info;
 }
 
+// Nettoie les données de simplification reçues du background (défensif : même si
+// BackgroundController sanitize déjà sa réponse, on ne fait jamais confiance
+// aveuglément à un message chrome.runtime).
+function sanitizeAiTextReplacements(value: unknown): TextReplacement[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is TextReplacement =>
+      Boolean(item) &&
+      typeof item === 'object' &&
+      typeof (item as any).original === 'string' &&
+      typeof (item as any).replacement === 'string' &&
+      (item as any).original.trim().length > 0,
+    )
+    .map((item) => ({ original: item.original.trim(), replacement: item.replacement.trim() }));
+}
+
+function sanitizeAiGlossary(value: unknown): GlossaryEntry[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .filter((item): item is GlossaryEntry =>
+      Boolean(item) &&
+      typeof item === 'object' &&
+      typeof (item as any).term === 'string' &&
+      typeof (item as any).definition === 'string' &&
+      (item as any).term.trim().length > 0,
+    )
+    .map((item) => ({ term: item.term.trim(), definition: item.definition.trim() }));
+}
+
+// Échappe les caractères spéciaux regex pour construire un motif de remplacement
+// littéral à partir d'un texte arbitraire renvoyé par l'IA.
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildLiteralRegex(original: string): RegExp {
+  return new RegExp(escapeRegExp(original), 'gi');
+}
+
 async function analyzePageSilent() {
   chrome.runtime.sendMessage({ type: 'ANALYSIS_STARTED' }).catch(() => {});
   const blocks = collectBlocks();
@@ -548,6 +617,15 @@ async function analyzePageSilent() {
     // On vérifie si l'IA a échoué, mais ON NE FAIT PLUS CRASHER LE SCRIPT (pas de "throw")
     const hasAiError = chrome.runtime.lastError || !response || response.error;
     const aiErrorMessage = chrome.runtime.lastError?.message || response?.error || '';
+
+    // Remplacements / glossaire / libellés UI proposés par l'IA (voir BackgroundController).
+    // On les stocke au niveau module : applyVisualModifications() les utilisera en priorité,
+    // les règles statiques restant actives en filet de sécurité dans tous les cas.
+    if (!hasAiError) {
+      aiReplacements = sanitizeAiTextReplacements(response.replacements);
+      aiGlossary = sanitizeAiGlossary(response.glossary);
+      aiUiLabels = sanitizeAiTextReplacements(response.ui_labels);
+    }
 
     // On prépare le paquet de données (IA + Local)
     const analysisData = {
@@ -574,6 +652,11 @@ async function analyzePageSilent() {
 
     // On envoie à la barre latérale
     chrome.runtime.sendMessage({ type: 'ANALYSIS_COMPLETE', data: analysisData }).catch(() => {});
+
+    // On ré-applique la simplification visuelle maintenant que les remplacements et le
+    // glossaire IA sont disponibles : ils s'ajoutent aux règles statiques déjà appliquées
+    // (celles-ci ont servi de retour immédiat pendant que l'IA travaillait).
+    applyVisualModifications();
   } catch (error) {
     chrome.runtime.sendMessage({ type: 'ANALYSIS_ERROR' }).catch(() => {});
   }
@@ -680,6 +763,22 @@ function simplifyUIButton(text: string): string | null {
   return null;
 }
 
+
+// Form
+function detectAndReportForms() {
+  const forms = detectForms();
+  if (forms.length === 0) return;
+
+  // On ne propose que le formulaire le plus riche en champs pour éviter de
+  // proposer le mode vocal sur une simple barre de recherche du header.
+  const richestForm = forms.reduce((best, current) =>
+    current.fields.length > best.fields.length ? current : best, forms[0]);
+
+  if (richestForm.fields.length < 2) return;
+
+  chrome.runtime.sendMessage({ type: 'FORM_DETECTED', form: richestForm }).catch(() => {});
+}
+
 // Détection tardive : certains sites chargent leur bouton de contact après coup
 // (SPA, contenu lazy-loadé). Si on en trouve un après la première analyse, on met
 // à jour le stockage ET on notifie le sidebar en direct.
@@ -693,9 +792,8 @@ function refreshContactLinkIfNeeded() {
   const storageKey = `${STORAGE_PREFIX}${cleanUrl}`;
 
   chrome.storage.local.get([storageKey], (result) => {
-    // AJOUT DU CAST "as StorageData" ICI
-    const existing = result[storageKey] as StorageData; 
-    
+    const existing = result[storageKey] as StorageData;
+
     if (!existing) return;
 
     // S'il n'y avait pas de lien de contact enregistré, on met à jour
@@ -716,6 +814,9 @@ function refreshContactLinkIfNeeded() {
   });
 }
 
+// La simplification visuelle et la détection de contact s'appliquent automatiquement
+// dès le chargement de la page (voir init()), puis sont réappliquées à chaque
+// changement notable du DOM (SPA, contenu lazy-loadé) — pas besoin de bouton manuel.
 function startDomObserver() {
   if (observer) observer.disconnect();
 
@@ -726,7 +827,6 @@ function startDomObserver() {
     (window as any).__failcTimeout = setTimeout(() => {
       applyVisualModifications();
       refreshContactLinkIfNeeded();
-
       if (activeProfile === 'low-vision') {
         enhanceLowVisionContrast();
       }
@@ -734,6 +834,7 @@ function startDomObserver() {
       if (activeProfile === 'anti-epilepsy') {
         applyAntiEpilepsyRuntime();
       }
+      detectAndReportForms();
     }, 500);
   });
 
@@ -830,10 +931,22 @@ function applyVisualModifications() {
   // Champs de recherche (placeholder / aria-label) — traités séparément du texte visible
   simplifySearchFields();
 
-  // Uniquement des remplacements sûrs, ciblés sur la navigation d'une démarche
+  type ReplacerFunc = (substring: string, ...args: any[]) => string;
+
+  // 1) Remplacements proposés par l'IA (littéraux, tels que renvoyés sur CE chargement de page).
+  const aiTextReplacements: Array<[RegExp, string]> = aiReplacements.map((entry) => [
+    buildLiteralRegex(entry.original),
+    entry.replacement,
+  ]);
+
+  // 2) Règles statiques : toujours actives, en complément de l'IA (elles couvrent ce que
+  // l'IA n'a pas détecté, et sont la seule protection si l'IA est indisponible).
   // (on a retiré les remplacements trop larges type "documents" / "dossier" / "justificatif"
   // qui changeaient le sens de mots courants partout sur la page)
-  const replacements: Array<[RegExp, string]> = [
+  const staticReplacements: Array<[RegExp, string | ReplacerFunc]> = [
+    // 👤 PROFILS DYNAMIQUES ("Vous êtes un(e) X" -> "X")
+    [/\bvous êtes un(?:e)?\s+([a-zà-ÿ]+)\b/gi, (match, mot) => mot.toUpperCase()],
+
     // 🔍 RECHERCHE
     [/\bque cherchez[- ]vous\s*\??/gi, 'RECHERCHE'],
     [/\brechercher\b/gi, 'RECHERCHE'],
@@ -883,6 +996,12 @@ function applyVisualModifications() {
     [/\bdéconnexion\b/gi, 'DÉCONNEXION']
   ];
 
+  // L'IA passe en premier : ses remplacements sont essayés avant les règles statiques.
+  // Une fois qu'un motif a été remplacé (par l'IA ou par une règle statique), le motif
+  // d'origine n'existe plus dans le texte, donc le passage suivant ne peut pas le
+  // re-modifier — pas de conflit entre les deux sources.
+  const replacements: Array<[RegExp, string | ReplacerFunc]> = [...aiTextReplacements, ...staticReplacements];
+
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
 
   const textNodes: Text[] = [];
@@ -904,7 +1023,9 @@ function applyVisualModifications() {
 
     // 1. simplification texte simple (SAFE) — remplacements ciblés uniquement
     replacements.forEach(([pattern, replacement]) => {
-      modified = modified.replace(pattern, replacement);
+      // Le "as any" fait taire TypeScript sur l'overload string | ReplacerFunc,
+      // tout en fonctionnant parfaitement en JS pour les deux cas.
+      modified = modified.replace(pattern, replacement as any);
     });
 
     if (modified !== text) {
@@ -912,8 +1033,13 @@ function applyVisualModifications() {
     }
 
     // 2. glossaire → highlight léger sans casser DOM
-    TERM_DEFINITIONS.forEach((entry) => {
-      const regex = new RegExp(`\\b${entry.term}\\b`, 'i');
+    // Glossaire IA d'abord (termes détectés spécifiquement sur cette page), puis
+    // glossaire statique en complément (le garde-fou dataset.failcProcessed évite
+    // tout double traitement si un terme apparaît dans les deux listes).
+    const glossaryEntries: GlossaryEntry[] = [...aiGlossary, ...TERM_DEFINITIONS];
+
+    glossaryEntries.forEach((entry) => {
+      const regex = new RegExp(`\\b${escapeRegExp(entry.term)}\\b`, 'i');
       if (regex.test(node.nodeValue || '')) {
         const parent = node.parentElement;
         if (!parent) return;
@@ -949,7 +1075,22 @@ function applyVisualModifications() {
       el.textContent?.trim() ||
       "";
 
-    const simplified = simplifyUIButton(text);
+    // Libellé IA d'abord (correspondance sur le texte normalisé du bouton/lien),
+    // sinon on retombe sur la détection par mot-clé statique (simplifyUIButton).
+    let simplified: string | null = null;
+
+    if (aiUiLabels.length > 0) {
+      const normalizedText = normalize(text);
+      const aiMatch = aiUiLabels.find((entry) => normalizedText.includes(normalize(entry.original)));
+      if (aiMatch && aiMatch.replacement.trim()) {
+        simplified = aiMatch.replacement.trim().toUpperCase();
+      }
+    }
+
+    if (!simplified) {
+      simplified = simplifyUIButton(text);
+    }
+
     const isDemarche = !simplified && isNoteworthyDemarcheLink(text);
 
     if (!simplified && !isDemarche) return;
@@ -974,9 +1115,13 @@ function init() {
 
   if (!isSupportedSite()) return;
 
-  // Apply simplification immediately so users don't need to click in the popup.
+  // Application immédiate de la simplification, de la détection de contact
+  // et de l'analyse IA (résumé), pour que tout soit prêt sans que l'utilisateur
+  // ait besoin de cliquer sur un bouton dans le popup.
   applyVisualModifications();
   refreshContactLinkIfNeeded();
+  detectAndReportForms();
+  void analyzePageSilent();
 
   chrome.storage.local.get(['failcProfile'], (result) => {
     activeProfile = (result.failcProfile as Profile) || 'standard';
@@ -998,8 +1143,27 @@ function init() {
       void analyzePageSilent();
     }
     if (message.type === 'MODIFY_PAGE') {
+      // Conservé pour compatibilité (ex: relance manuelle depuis un autre appelant) :
+      // ré-applique la simplification et la détection de contact à la demande.
       applyVisualModifications();
+      refreshContactLinkIfNeeded();
     }
+    if (message.type === 'FILL_FIELD') {
+      const ok = fillField(message.selector, message.value, message.fieldType);
+      if (!ok) {
+        highlightField(message.selector, 'error');
+      }
+    }
+    if (message.type === 'HIGHLIGHT_FIELD_SUCCESS') {
+      highlightField(message.selector, 'success');
+    }
+    if (message.type === 'CLEAR_FIELD_HIGHLIGHT') {
+      clearFieldHighlight(message.selector);
+    }
+    if (message.type === 'SUBMIT_FORM') {
+      submitOrAdvance(message.formSelector, message.submitSelector);
+    }
+    return false;
   });
 }
 
