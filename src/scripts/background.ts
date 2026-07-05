@@ -5,7 +5,8 @@ import { TabService } from './services/tabService';
 import { DefaultWebPageStrategy } from './strategies/DefaultWebPageStrategy';
 import { GoogleDocsStrategy } from './strategies/GoogleDocsStrategy';
 import { YouTubeStrategy } from './strategies/YouTubeStrategy';
-import { ExtensionMessage } from './types';
+import { ChatHistoryTurn, ExtensionMessage } from './types';
+import { FormFillController } from './controllers/FormFillController';
 
 type AIProvider = 'openai' | 'gemini';
 
@@ -57,10 +58,25 @@ interface GeminiModelInfo {
   supportedGenerationMethods?: string[];
 }
 
+// Historique de chat envoyé par le sidebar : derniers échanges question/réponse
+// (voir ChatHistoryTurn dans types.ts)
+
 function extractJsonResponse(content: string): string {
   const trimmed = content.trim();
   const jsonMatch = trimmed.match(/\{[\s\S]*\}$/);
   return jsonMatch ? jsonMatch[0] : trimmed;
+}
+
+// Construit un rendu texte de l'historique pour le donner en contexte au modèle
+function formatChatHistory(history: ChatHistoryTurn[] | undefined): string {
+  if (!Array.isArray(history) || history.length === 0) {
+    return 'Aucun échange précédent.';
+  }
+
+  return history
+    .filter((turn) => turn && typeof turn.content === 'string')
+    .map((turn) => `${turn.role === 'user' ? 'Utilisateur' : 'Assistant'} : ${turn.content}`)
+    .join('\n');
 }
 
 // --------------------------------------------------------
@@ -138,7 +154,7 @@ async function callOpenAI(
 
     const data = await response.json();
     const textResponse = data.choices[0].message.content;
-    
+
     return expectJson ? JSON.parse(textResponse) : textResponse;
   } catch (error: unknown) {
     console.error('Erreur appel OpenAI :', error);
@@ -311,6 +327,7 @@ const tabContext = new TabContext([
 ]);
 const contextManager = new ContextManager(tabContext, tabService);
 const backgroundController = new BackgroundController(contextManager, callAI);
+const formFillController = new FormFillController(callAI);
 
 // --------------------------------------------------------
 // 3. GESTION DES MESSAGES
@@ -319,18 +336,34 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
   if (backgroundController.handleMessage(message, sender, sendResponse)) {
     return true;
   }
-  
-  // CHAT CONTEXTUEL (Question/Réponse)
+
+  if (formFillController.handleMessage(message, sender, sendResponse)) { // ← ajout
+    return true;
+  }
+
+  // CHAT CONTEXTUEL (Question/Réponse) — avec mémoire de conversation et corrélation par requestId
   if (message?.type === 'ASK_GEMINI_CONTEXT') {
+    const requestId = message.requestId;
+
     (async () => {
       try {
-        const systemPrompt = "Tu es un assistant d'accessibilité bienveillant. Réponds de manière directe, rassurante et très facile à comprendre.";
-        const userPrompt = `Contexte de la page sur laquelle je me trouve : "${message.context || 'Aucun.'}"\n\nMa question : "${message.question || ''}"`;
-        
+        const systemPrompt = "Tu es un assistant d'accessibilité bienveillant, spécialisé dans l'aide aux démarches administratives françaises (CAF, URSSAF, impôts, etc.). Réponds de manière directe, rassurante et très facile à comprendre (langage FALC). Tu expliques potentiellement à des utilisateurs atteints de troubles cognitifs, dys, psychiques, mentaux ou sensoriels, sois donc très clair, efficace, concis et pertinent dans tes réponses. Va à l'essentiel en gardant l'entièreté des informations."
+  + "Pour les questions portant sur des éléments précis de la page (où se trouve un bouton, comment remplir un champ, quelle démarche faire ici), base-toi en priorité sur le contexte de la page fourni. "
+  + "Pour les questions plus générales sur le sujet administratif ou fiscal concerné par la page (définitions, notions, noms propres, acronymes, sigles, etc même des questions de compréhension générale), tu peux répondre avec tes connaissances générales même si ce n'est pas mentionné sur la page, en donnant une explication simple et accessible. "
+  + "N'indique que tu ne sais pas que si la question sort réellement du domaine administratif/fiscal ou si tu n'as vraiment pas l'information.";
+
+        const historyText = formatChatHistory(message.history);
+
+        const userPrompt = `Contexte de la page sur laquelle je me trouve : "${message.context || 'Aucun.'}"\n\nHistorique de la conversation :\n${historyText}\n\nNouvelle question de l'utilisateur : "${message.question || ''}"`;
+
         const replyText = await callAI(systemPrompt, userPrompt, false);
-        chrome.runtime.sendMessage({ type: 'CHAT_REPLY', reply: replyText });
+        chrome.runtime.sendMessage({ type: 'CHAT_REPLY', reply: replyText, requestId });
       } catch (error: unknown) {
-        chrome.runtime.sendMessage({ type: 'CHAT_REPLY', reply: "❌ Désolé, erreur de connexion avec l'IA." });
+        const details = error instanceof Error ? error.message : '';
+        const friendlyMessage = details && /clé|api key|authorization/i.test(details)
+          ? "❌ Aucune clé API valide n'est configurée. Ouvrez les paramètres pour en ajouter une."
+          : "❌ Désolé, une erreur est survenue pendant la connexion à l'IA.";
+        chrome.runtime.sendMessage({ type: 'CHAT_REPLY', reply: friendlyMessage, requestId });
       }
     })();
     return true;
@@ -342,7 +375,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
       const status = message.status;
       chrome.action.setBadgeText({ text: status === 'ok' ? '✓' : '!' });
       chrome.action.setBadgeBackgroundColor({ color: status === 'ok' ? '#2e7d32' : '#c62828' });
-      setTimeout(() => chrome.action.setBadgeText({ text: '' }), 3000); 
+      setTimeout(() => chrome.action.setBadgeText({ text: '' }), 3000);
     } catch (e: unknown) {
       // ignore
     }

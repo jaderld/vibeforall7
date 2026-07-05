@@ -1,4 +1,6 @@
 import { extractPageContent } from './webExtraction';
+import { detectForms } from './services/FormDetectionService';
+import { fillField, highlightField, clearFieldHighlight, submitOrAdvance } from './services/FormFillingService';
 
 type Profile = 'standard' | 'dyslexia' | 'low-vision' | 'anti-epilepsy';
 type ContactInfo = {
@@ -412,6 +414,22 @@ function simplifyUIButton(text: string): string | null {
   return null;
 }
 
+
+// Form
+function detectAndReportForms() {
+  const forms = detectForms();
+  if (forms.length === 0) return;
+
+  // On ne propose que le formulaire le plus riche en champs pour éviter de
+  // proposer le mode vocal sur une simple barre de recherche du header.
+  const richestForm = forms.reduce((best, current) =>
+    current.fields.length > best.fields.length ? current : best, forms[0]);
+
+  if (richestForm.fields.length < 2) return;
+
+  chrome.runtime.sendMessage({ type: 'FORM_DETECTED', form: richestForm }).catch(() => {});
+}
+
 // Détection tardive : certains sites chargent leur bouton de contact après coup
 // (SPA, contenu lazy-loadé). Si on en trouve un après la première analyse, on met
 // à jour le stockage ET on notifie le sidebar en direct.
@@ -460,6 +478,7 @@ function startDomObserver() {
     (window as any).__failcTimeout = setTimeout(() => {
       applyVisualModifications();
       refreshContactLinkIfNeeded();
+      detectAndReportForms();
     }, 500);
   });
 
@@ -745,6 +764,7 @@ function init() {
   // ait besoin de cliquer sur un bouton dans le popup.
   applyVisualModifications();
   refreshContactLinkIfNeeded();
+  detectAndReportForms();
   void analyzePageSilent();
 
   chrome.storage.local.get(['failcProfile'], (result) => {
@@ -770,6 +790,21 @@ function init() {
       // ré-applique la simplification et la détection de contact à la demande.
       applyVisualModifications();
       refreshContactLinkIfNeeded();
+    }
+    if (message.type === 'FILL_FIELD') {
+      const ok = fillField(message.selector, message.value, message.fieldType);
+      if (!ok) {
+        highlightField(message.selector, 'error');
+      }
+    }
+    if (message.type === 'HIGHLIGHT_FIELD_SUCCESS') {
+      highlightField(message.selector, 'success');
+    }
+    if (message.type === 'CLEAR_FIELD_HIGHLIGHT') {
+      clearFieldHighlight(message.selector);
+    }
+    if (message.type === 'SUBMIT_FORM') {
+      submitOrAdvance(message.formSelector, message.submitSelector);
     }
     return false;
   });
