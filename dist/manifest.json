@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "FAILC",
-  "description": "Rend les démarches administratives accessibles : simplification FALC, définitions, détection de formulaires.",
+  "name": "FALCon",
+  "description": "Redonner le pouvoir de comprendre",
   "version": "1.0.0",
   "permissions": [
     "tabs",
@@ -18,11 +18,12 @@
     "https://generativelanguage.googleapis.com/*"
   ],
   "action": {
-    "default_title": "FAILC",
+    "default_title": "FALCon",
     "default_icon": {
-      "16": "icons/icon16.svg",
-      "48": "icons/icon48.svg",
-      "128": "icons/icon128.svg"
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
     }
   },
   "background": {
@@ -35,7 +36,7 @@
   "content_scripts": [
     {
       "js": [
-        "assets/contentScript.ts-loader-NkGmUHwR.js"
+        "assets/contentScript.ts-loader-DpheO9DD.js"
       ],
       "matches": [
         "<all_urls>"
@@ -44,9 +45,10 @@
     }
   ],
   "icons": {
-    "16": "icons/icon16.svg",
-    "48": "icons/icon48.svg",
-    "128": "icons/icon128.svg"
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
   },
   "web_accessible_resources": [
     {
@@ -55,7 +57,7 @@
       ],
       "resources": [
         "assets/constants-eEG3G7op.js",
-        "assets/contentScript.ts-CYzRpyLl.js"
+        "assets/contentScript.ts-COv_db3l.js"
       ],
       "use_dynamic_url": false
     }

@@ -1,6 +1,9 @@
 import React, { useEffect, useState, useRef } from 'react';
 import ReactDOM from 'react-dom/client';
 import { CHAT_HISTORY_LIMIT, CHAT_STORAGE_PREFIX } from '../scripts/constants';
+// Le logo est dans le même dossier que ce fichier : ajuste le chemin si ton bundler
+// place les assets ailleurs (ex: '../assets/logo.png').
+import logoUrl from './logo.png';
 
 type Profile = 'standard' | 'dyslexia' | 'low-vision' | 'anti-epilepsy';
 type AIProvider = 'openai' | 'gemini';
@@ -119,24 +122,28 @@ const getAnalysisStorageKey = (url: string) => `failc:${url}`;
 type ChatMessage = { role: 'user' | 'assistant'; content: string; ts: number };
 const getChatStorageKey = (url: string) => `${CHAT_STORAGE_PREFIX}${url}`;
 
+// Palette inspirée du logo FALCON (dégradé cyan -> bleu profond de l'aile,
+// et bleu roi du corps de l'oiseau).
 const tokens = {
-  bg: '#F5F6F8',
+  bg: '#EFF6FC',
   surface: '#FFFFFF',
-  border: '#DADFE6',
-  borderStrong: '#B9C2CD',
-  textPrimary: '#1F2A37',
-  textSecondary: '#5B6675',
-  accent: '#2F5D8A',
-  accentHover: '#264B70',
-  accentSoftBg: '#E8EFF6',
-  accentSoftBorder: '#C7D6E6',
-  neutralDark: '#33404F',
+  border: '#D6E4F0',
+  borderStrong: '#AFC8DE',
+  textPrimary: '#122A42',
+  textSecondary: '#51697E',
+  accent: '#1465C7',
+  accentHover: '#0E4C9E',
+  accentSoftBg: '#E4F3FA',
+  accentSoftBorder: '#BFE3F2',
+  neutralDark: '#173654',
   success: '#2E7D4F',
   successBg: '#E7F3EC',
   error: '#B3411F',
   errorBg: '#FBEAE4',
   radius: 10,
   fontFamily: '"Atkinson Hyperlegible", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif',
+  // Dégradé repris directement des ailes du logo (cyan clair -> bleu profond)
+  headerGradient: 'linear-gradient(135deg, #22C9E8 0%, #1E7FDC 55%, #17469E 100%)',
 };
 
 const focusRing: React.CSSProperties = {
@@ -612,13 +619,20 @@ const Sidebar = () => {
   const profileCss = getSidebarProfileCss(activeProfile);
 
   return (
-    <div className={`failc-sidebar-root ${profileClass}`} style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 72, fontFamily: 'Arial, sans-serif',  background: '#f8fafc', color: '#0f172a' }}>
+    <div className={`failc-sidebar-root ${profileClass}`} style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 72, fontFamily: 'Arial, sans-serif',  background: tokens.bg, color: '#0f172a' }}>
       {profileCss && <style>{profileCss}</style>}
       {/* En-tête */}
-      <div style={{ background: tokens.accent, color: '#FFFFFF', padding: '14px 16px', borderRadius: tokens.radius, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', opacity: 0.92 }}>FAILC ASSISTANT</div>
-          <div style={{ fontSize: 21, fontWeight: 700, marginTop: 4 }}>Accessibilité Web</div>
+      <div style={{ background: tokens.headerGradient, color: '#FFFFFF', padding: '14px 16px', borderRadius: tokens.radius, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+          <img
+            src={logoUrl}
+            alt="Logo FALCON"
+            style={{ width: 40, height: 40, objectFit: 'contain', flexShrink: 0, filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.25))' }}
+          />
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', opacity: 0.92 }}>FALCon ASSISTANT</div>
+            <div style={{ fontSize: 21, fontWeight: 700, marginTop: 4 }}>Accessibilité Web</div>
+          </div>
         </div>
         <button onClick={analyzePageManually} disabled={isAnalyzing} aria-label="Relancer l'analyse de la page" title="Relancer l'analyse" style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 6, height: 38, padding: '0 12px', borderRadius: 999, border: '1px solid rgba(255, 255, 255, 0.55)', background: isAnalyzing ? 'rgba(255, 255, 255, 0.18)' : 'rgba(255, 255, 255, 0.14)', color: '#ffffff', fontSize: 12.5, fontWeight: 700, fontFamily: 'inherit', cursor: isAnalyzing ? 'not-allowed' : 'pointer' }}>
           <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>↻</span> Relancer
