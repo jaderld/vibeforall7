@@ -3,8 +3,6 @@ import { ContextManager } from './models/ContextManager';
 import { TabContext } from './models/TabContext';
 import { TabService } from './services/tabService';
 import { DefaultWebPageStrategy } from './strategies/DefaultWebPageStrategy';
-import { GoogleDocsStrategy } from './strategies/GoogleDocsStrategy';
-import { YouTubeStrategy } from './strategies/YouTubeStrategy';
 import { ChatHistoryTurn, ExtensionMessage } from './types';
 import { FormFillController } from './controllers/FormFillController';
 
@@ -342,8 +340,6 @@ async function callAI(systemPrompt: string, userPrompt: string, expectJson: bool
 
 const tabService = new TabService();
 const tabContext = new TabContext([
-  new GoogleDocsStrategy(tabService),
-  new YouTubeStrategy(),
   new DefaultWebPageStrategy(tabService),
 ]);
 const contextManager = new ContextManager(tabContext, tabService);
