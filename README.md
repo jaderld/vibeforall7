@@ -65,12 +65,12 @@ And this is it for the install! Below, you cand find more details about our proj
 
 Millions of people in France struggle to complete essential administrative tasks online — filing taxes, requesting family benefits (CAF), managing health reimbursements (Ameli), or renewing an ID card (ANTS) — because these websites are:
 
-- Written in dense administrative "jargon" ("avis d'imposition", "revenu fiscal de référence", "complémentaire santé"...)
+- Written in dense administrative jargon ("avis d'imposition", "revenu fiscal de référence", "complémentaire santé"...)
 - Visually overwhelming for people with dyslexia, low vision, or photosensitive epilepsy
 - Full of long, multi-step forms that are hard to navigate without help
 - Missing a simple way to find "where do I get help" (contact, phone number, appointment booking)
 
-This disproportionately affects **elderly people, people with disabilities, non-native speakers, and anyone with cognitive or visual impairments** — exactly the population these public services are meant to serve.
+This disproportionately affects **elderly people, people with disabilities, non-native speakers, and anyone with cognitive or visual impairments**.
 
 ## Our solution
 
