@@ -499,13 +499,15 @@ function findContactLink(): { label: string; url: string } | null {
       const isButton = el.tagName.toLowerCase() === 'button' || el.getAttribute('role') === 'button';
 
       if (!isButton) {
+        const hasUnsafeScheme = /^\s*(?:javascript|data|vbscript):/i.test(rawHref);
+
         // FILTRE 1 : On ignore directement les ancres brutes, la racine ou le JS
         if (
           !url ||
           rawHref === '#' ||
           rawHref === '/' ||
           rawHref.startsWith('#') ||
-          rawHref.startsWith('javascript:')
+          hasUnsafeScheme
         ) {
           continue;
         }
@@ -945,7 +947,7 @@ function applyVisualModifications() {
   // qui changeaient le sens de mots courants partout sur la page)
   const staticReplacements: Array<[RegExp, string | ReplacerFunc]> = [
     // 👤 PROFILS DYNAMIQUES ("Vous êtes un(e) X" -> "X")
-    [/\bvous êtes un(?:e)?\s+([a-zà-ÿ]+)\b/gi, (match, mot) => mot.toUpperCase()],
+    [/\bvous êtes un(?:e)?\s+([a-zà-ÿ]+)\b/gi, (_match, mot) => mot.toUpperCase()],
 
     // 🔍 RECHERCHE
     [/\bque cherchez[- ]vous\s*\??/gi, 'RECHERCHE'],
