@@ -107,6 +107,13 @@ const Popup = () => {
   const currentTabIdRef = useRef<number | null>(null);
   const voiceCancelledRef = useRef(false);
   const activeRecognitionRef = useRef<any>(null);
+  const currentUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null); // NOUVEAU: Référence pour empêcher le Garbage Collector
+
+  const [isBotSpeaking, setIsBotSpeaking] = useState<boolean>(false);
+  const stopBotSpeech = () => {
+    window.speechSynthesis.cancel();
+    setIsBotSpeaking(false);
+  };
 
   // --- Formulaire Vocal ---
   const [currentTabId, setCurrentTabId] = useState<number | null>(null);
@@ -115,7 +122,6 @@ const Popup = () => {
   const [voiceFormStatus, setVoiceFormStatus] = useState<'idle' | 'speaking' | 'listening' | 'processing'>('idle');
   const [voiceFormProgress, setVoiceFormProgress] = useState<{ index: number; total: number } | null>(null);
   const [voiceFormError, setVoiceFormError] = useState<string>('');
-  // NOUVEAU : Historique de la conversation du formulaire
   const [voiceFormHistory, setVoiceFormHistory] = useState<{ role: 'bot' | 'user'; text: string }[]>([]);
   const formEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -147,12 +153,23 @@ const Popup = () => {
         setChatError(isErrorReply ? replyText.replace(/^❌\s*/, '') : '');
         setChatMessages((prev) => [...prev, { role: 'assistant' as const, content: replyText, ts: Date.now() }]);
 
-        // NOUVEAU : Le Chatbot parle sa réponse à voix haute
         if (!isErrorReply) {
-          // Retire les astérisques du markdown pour éviter que la voix ne les lise
+          window.speechSynthesis.cancel();
+          
           const cleanTextForSpeech = replyText.replace(/\*/g, '');
           const utterance = new SpeechSynthesisUtterance(cleanTextForSpeech);
           utterance.lang = 'fr-FR';
+          
+          // FIX : Stocker dans la référence pour éviter le Garbage Collector de Chrome
+          currentUtteranceRef.current = utterance;
+          
+          utterance.onstart = () => setIsBotSpeaking(true);
+          utterance.onend = () => setIsBotSpeaking(false);
+          utterance.onerror = (e) => {
+            console.warn("Erreur de synthèse vocale :", e);
+            setIsBotSpeaking(false);
+          };
+          
           window.speechSynthesis.speak(utterance);
         }
       }
@@ -162,7 +179,6 @@ const Popup = () => {
       if (message.type === 'VOICE_FORM_QUESTION') {
         setVoiceFormError('');
         setVoiceFormProgress({ index: message.index, total: message.total });
-        // NOUVEAU : On ajoute la question du bot à l'historique visuel
         setVoiceFormHistory((prev) => [...prev, { role: 'bot', text: message.question }]);
         void runVoiceQuestionCycle(message.question);
       }
@@ -305,6 +321,12 @@ const Popup = () => {
     const question = chatInput.trim();
     if (!question || isChatSending) return;
 
+    // FIX : Débloquer les droits audio du navigateur via une action utilisateur immédiate
+    const unlockUtterance = new SpeechSynthesisUtterance('');
+    unlockUtterance.volume = 0; // Silencieux
+    window.speechSynthesis.speak(unlockUtterance);
+    window.speechSynthesis.cancel();
+
     const requestId = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     pendingChatRequestRef.current = requestId;
     const history = chatMessages.slice(-CHAT_HISTORY_LIMIT).map((entry) => ({ role: entry.role, content: entry.content }));
@@ -378,9 +400,11 @@ const Popup = () => {
   const speak = (text: string): Promise<void> => {
     return new Promise((resolve) => {
       setVoiceFormStatus('speaking');
-      // On s'assure d'enlever le markdown ici aussi au cas où
       const utterance = new SpeechSynthesisUtterance(text.replace(/\*/g, ''));
       utterance.lang = 'fr-FR';
+      
+      currentUtteranceRef.current = utterance; // FIX Garbage Collector
+
       utterance.onend = () => resolve();
       utterance.onerror = () => resolve();
       window.speechSynthesis.speak(utterance);
@@ -446,7 +470,6 @@ const Popup = () => {
       return;
     }
 
-    // NOUVEAU : On ajoute la réponse reconnue à l'historique visuel
     setVoiceFormHistory((prev) => [...prev, { role: 'user', text: transcript }]);
     chrome.runtime.sendMessage({ type: 'VOICE_FORM_ANSWER', tabId: currentTabIdRef.current, answerText: transcript }).catch(() => {});
   };
@@ -523,7 +546,6 @@ const Popup = () => {
         </button>
       </div>
 
-      {/* Reste du code des paramètres caché pour brièveté, identique à avant */}
       {/* Profils d'affichage */}
       {showProfileSettings && (
         <div style={{ marginBottom: 16, padding: 16, background: tokens.surface, borderRadius: tokens.radius, border: `1px solid ${tokens.border}` }}>
@@ -663,7 +685,6 @@ const Popup = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto', marginBottom: 12, paddingRight: 4 }}>
             {chatMessages.map((entry, idx) => (
               <div key={idx} style={{ alignSelf: entry.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%', background: entry.role === 'user' ? tokens.accentSoftBg : tokens.bg, color: tokens.textPrimary, border: `1px solid ${entry.role === 'user' ? tokens.accentSoftBorder : tokens.border}`, borderRadius: 10, padding: '8px 12px', fontSize: 13.5, lineHeight: 1.5 }}>
-                {/* NOUVEAU : On utilise renderMarkdown ici pour formater la réponse */}
                 {renderMarkdown(entry.content)}
               </div>
             ))}
@@ -674,6 +695,32 @@ const Popup = () => {
 
         {chatError && <div role="alert" style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 8, background: tokens.errorBg, fontSize: 12.5, color: tokens.error, fontWeight: 600 }}>⚠ {chatError}</div>}
 
+        {/* BOUTON POUR COUPER LA VOIX DU BOT */}
+        {isBotSpeaking && (
+          <button
+            onClick={stopBotSpeech}
+            style={{
+              alignSelf: 'center',
+              margin: '0 auto 10px auto',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 6,
+              padding: '6px 14px',
+              background: tokens.errorBg,
+              color: tokens.error,
+              border: `1px solid ${tokens.error}`,
+              borderRadius: 999,
+              fontSize: 12.5,
+              fontWeight: 700,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              width: 'max-content'
+            }}
+          >
+            <span aria-hidden="true">🔇</span> ARRETER LA VOIX
+          </button>
+        )}
         <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
           <textarea value={chatInput} onChange={(event) => setChatInput(event.target.value)} onKeyDown={handleChatKeyDown} placeholder="Écrivez votre question ici…" rows={2} style={{ flex: 1, resize: 'none', borderRadius: 8, border: `1px solid ${tokens.borderStrong}`, padding: '10px 12px', fontSize: 14, fontFamily: 'inherit', color: tokens.textPrimary, background: tokens.surface }} />
           <button onClick={toggleVoiceInput} aria-pressed={isListening} aria-label={isListening ? 'Arrêter la dictée vocale' : 'Poser la question à la voix'} title={isListening ? 'Arrêter la dictée vocale' : 'Dicter la question'} style={{ flexShrink: 0, width: 44, height: 44, borderRadius: 8, border: `1px solid ${isListening ? tokens.error : tokens.borderStrong}`, background: isListening ? tokens.errorBg : tokens.surface, color: isListening ? tokens.error : tokens.textSecondary, fontSize: 18, cursor: 'pointer' }}>

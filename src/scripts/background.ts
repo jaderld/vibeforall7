@@ -16,8 +16,8 @@ const AI_STORAGE_KEYS = {
   geminiKey: 'failcGeminiApiKey',
 } as const;
 
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
-const GEMINI_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const OPENAI_API_URL = '[https://api.openai.com/v1/chat/completions](https://api.openai.com/v1/chat/completions)';
+const GEMINI_API_URL_BASE = '[https://generativelanguage.googleapis.com/v1beta/models](https://generativelanguage.googleapis.com/v1beta/models)';
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const GEMINI_PRIMARY_MODEL = 'models/gemini-3.1-flash-lite';
 const GEMINI_MODELS_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -58,13 +58,35 @@ interface GeminiModelInfo {
   supportedGenerationMethods?: string[];
 }
 
-// Historique de chat envoyé par le sidebar : derniers échanges question/réponse
-// (voir ChatHistoryTurn dans types.ts)
+// --------------------------------------------------------
+// FONCTION DE NETTOYAGE JSON (Correction Gemini Markdown)
+// --------------------------------------------------------
+function cleanAndParseJSON(aiResponse: string) {
+  try {
+    // 1. On retire les balises Markdown ```json et ```
+    let cleanedText = aiResponse.replace(/```json/gi, '').replace(/```/g, '').trim();
+    
+    // 2. Sécurité supplémentaire : on extrait de force ce qui se trouve entre { et }
+    // au cas où Gemini aurait ajouté du blabla avant ou après (ex: "Voici le JSON :")
+    const firstBrace = cleanedText.indexOf('{');
+    const lastBrace = cleanedText.lastIndexOf('}');
+    
+    // On extrait aussi pour les tableaux [ ] au cas où l'IA renverrait une liste
+    const firstBracket = cleanedText.indexOf('[');
+    const lastBracket = cleanedText.lastIndexOf(']');
 
-function extractJsonResponse(content: string): string {
-  const trimmed = content.trim();
-  const jsonMatch = trimmed.match(/\{[\s\S]*\}$/);
-  return jsonMatch ? jsonMatch[0] : trimmed;
+    if (firstBrace !== -1 && lastBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      cleanedText = cleanedText.substring(firstBrace, lastBrace + 1);
+    } else if (firstBracket !== -1 && lastBracket !== -1) {
+      cleanedText = cleanedText.substring(firstBracket, lastBracket + 1);
+    }
+
+    // 3. On parse le JSON assaini
+    return JSON.parse(cleanedText);
+  } catch (error) {
+    console.error("Échec critique du parsing JSON. Texte brut renvoyé par l'IA :", aiResponse);
+    throw error;
+  }
 }
 
 // Construit un rendu texte de l'historique pour le donner en contexte au modèle
@@ -155,7 +177,7 @@ async function callOpenAI(
     const data = await response.json();
     const textResponse = data.choices[0].message.content;
 
-    return expectJson ? JSON.parse(textResponse) : textResponse;
+    return expectJson ? cleanAndParseJSON(textResponse) : textResponse;
   } catch (error: unknown) {
     console.error('Erreur appel OpenAI :', error);
     throw error;
@@ -191,8 +213,7 @@ async function callGemini(
 
   for (const model of modelCandidates) {
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent?key=${apiKey}`,
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: {
@@ -230,7 +251,7 @@ async function callGemini(
         throw new Error('Réponse Gemini vide');
       }
 
-      return expectJson ? JSON.parse(extractJsonResponse(textResponse)) : textResponse;
+      return expectJson ? cleanAndParseJSON(textResponse) : textResponse;
     } catch (error: unknown) {
       lastError = error instanceof Error ? error : new Error(String(error));
       break;
@@ -337,7 +358,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
     return true;
   }
 
-  if (formFillController.handleMessage(message, sender, sendResponse)) { // ← ajout
+  if (formFillController.handleMessage(message, sender, sendResponse)) {
     return true;
   }
 
@@ -347,7 +368,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
 
     (async () => {
       try {
-        const systemPrompt = "Tu es un assistant d'accessibilité bienveillant, spécialisé dans l'aide aux démarches administratives françaises (CAF, URSSAF, impôts, etc.). Réponds de manière directe, rassurante et très facile à comprendre (langage FALC). Tu expliques potentiellement à des utilisateurs atteints de troubles cognitifs, dys, psychiques, mentaux ou sensoriels, sois donc très clair, efficace, concis et pertinent dans tes réponses. Va à l'essentiel en gardant l'entièreté des informations."
+        const systemPrompt = "Tu es un assistant d'accessibilité bienveillant, spécialisé dans l'aide aux démarches administratives françaises (CAF, URSSAF, impôts, etc.). Réponds de manière directe, rassurante et très facile à comprendre (langage FALC). Va à l'essentiel, les réponses doivent être courtes, évite les longues phrases rédigées, va à l'essentiel."
   + "Pour les questions portant sur des éléments précis de la page (où se trouve un bouton, comment remplir un champ, quelle démarche faire ici), base-toi en priorité sur le contexte de la page fourni. "
   + "Pour les questions plus générales sur le sujet administratif ou fiscal concerné par la page (définitions, notions, noms propres, acronymes, sigles, etc même des questions de compréhension générale), tu peux répondre avec tes connaissances générales même si ce n'est pas mentionné sur la page, en donnant une explication simple et accessible. "
   + "N'indique que tu ne sais pas que si la question sort réellement du domaine administratif/fiscal ou si tu n'as vraiment pas l'information.";
