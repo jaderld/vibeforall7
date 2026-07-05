@@ -19,8 +19,83 @@ const profiles: Array<{ id: Profile; label: string }> = [
   { id: 'standard', label: 'Standard' },
   { id: 'dyslexia', label: 'Dyslexie' },
   { id: 'low-vision', label: 'Basse vision' },
-  { id: 'anti-epilepsy', label: 'Anti-épilepsie' }
+  { id: 'anti-epilepsy', label: 'Photosensible' }
 ];
+
+const SIDEBAR_TEXT_SELECTOR = [
+  'p', 'li', 'label', 'small', 'strong', 'em', 'b', 'u',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'button', 'input', 'select', 'textarea', 'option', 'span'
+].join(', ');
+
+const SIDEBAR_INTERACTIVE_SELECTOR = [
+  'button', 'a', 'input', 'select', 'textarea', '[role="button"]'
+].join(', ');
+
+function getSidebarProfileCss(profile: Profile) {
+  if (profile === 'standard') {
+    return '';
+  }
+
+  if (profile === 'dyslexia') {
+    return `
+      .failc-sidebar-root.failc-profile-dyslexia ${SIDEBAR_TEXT_SELECTOR} {
+        font-family: Verdana, Arial, sans-serif !important;
+        line-height: 1.6 !important;
+        letter-spacing: 0.05em !important;
+        word-spacing: 0.16em !important;
+        text-align: left !important;
+      }
+
+      .failc-sidebar-root.failc-profile-dyslexia p {
+        max-width: 70ch !important;
+        margin-bottom: 1.5em !important;
+      }
+
+      .failc-sidebar-root.failc-profile-dyslexia .material-icons,
+      .failc-sidebar-root.failc-profile-dyslexia .material-symbols-outlined,
+      .failc-sidebar-root.failc-profile-dyslexia .fa,
+      .failc-sidebar-root.failc-profile-dyslexia [class^="fa-"],
+      .failc-sidebar-root.failc-profile-dyslexia [class*=" fa-"],
+      .failc-sidebar-root.failc-profile-dyslexia .bi,
+      .failc-sidebar-root.failc-profile-dyslexia [class^="bi-"],
+      .failc-sidebar-root.failc-profile-dyslexia [class*=" bi-"] {
+        font-family: revert !important;
+        letter-spacing: normal !important;
+        word-spacing: normal !important;
+      }
+    `;
+  }
+
+  if (profile === 'low-vision') {
+    return `
+      .failc-sidebar-root.failc-profile-low-vision ${SIDEBAR_TEXT_SELECTOR} {
+        font-size: max(1.25rem, 1em) !important;
+        font-weight: 550 !important;
+        line-height: 1.6 !important;
+      }
+
+      .failc-sidebar-root.failc-profile-low-vision ${SIDEBAR_INTERACTIVE_SELECTOR} {
+        min-width: 2.75rem !important;
+        min-height: 2.75rem !important;
+      }
+
+      .failc-sidebar-root.failc-profile-low-vision :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+        outline: 3px solid #f59e0b !important;
+        outline-offset: 3px !important;
+        box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.32) !important;
+      }
+    `;
+  }
+
+  return `
+    .failc-sidebar-root.failc-profile-anti-epilepsy,
+    .failc-sidebar-root.failc-profile-anti-epilepsy * {
+      animation: none !important;
+      transition: none !important;
+      scroll-behavior: auto !important;
+    }
+  `;
+}
 
 const aiProviders: Array<{ id: AIProvider; label: string; note: string }> = [
   { id: 'openai', label: 'OpenAI', note: 'Utilise l’API OpenAI avec GPT-4o mini.' },
@@ -533,8 +608,12 @@ const Popup = () => {
     setVoiceFormError('');
   };
 
+  const profileClass = `failc-profile-${activeProfile}`;
+  const profileCss = getSidebarProfileCss(activeProfile);
+
   return (
-    <div style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 76, fontFamily: tokens.fontFamily, fontSize: 15, lineHeight: 1.55, background: tokens.bg, color: tokens.textPrimary }}>
+    <div className={`failc-sidebar-root ${profileClass}`} style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 72, fontFamily: 'Arial, sans-serif',  background: '#f8fafc', color: '#0f172a' }}>
+      {profileCss && <style>{profileCss}</style>}
       {/* En-tête */}
       <div style={{ background: tokens.accent, color: '#FFFFFF', padding: '14px 16px', borderRadius: tokens.radius, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
         <div>

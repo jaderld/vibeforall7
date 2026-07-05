@@ -39,6 +39,269 @@ let activeProfile: Profile = 'standard';
 let currentPopover: HTMLDivElement | null = null;
 let observer: MutationObserver | null = null;
 
+const TEXTUAL_ELEMENTS_SELECTOR = [
+  'p', 'li', 'dt', 'dd', 'blockquote', 'figcaption', 'caption', 'td', 'th', 'label',
+  'legend', 'small', 'strong', 'em', 'b', 'u', 'mark', 'time', 'summary', 'details',
+  'a', 'button', 'input', 'textarea', 'select', 'option', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'pre', 'code', 'kbd', 'samp', 'article', 'section', 'main', 'aside', 'nav', 'header', 'footer', 'address'
+].join(', ');
+
+const APP_UI_TEXT_SELECTOR = [
+  'div[class]',
+  'span[class]',
+  'section[class]',
+  'article[class]',
+  'nav[class]',
+  'form[class]',
+  '[role="button"]',
+  '[role="tab"]',
+  '[role="menuitem"]',
+  '[role="heading"]',
+  '[role="textbox"]',
+  '[role="option"]',
+  '[role="listitem"]',
+  '[class*="card"]',
+  '[class*="panel"]',
+  '[class*="tile"]',
+  '[class*="field"]',
+  '[class*="form"]',
+  '[class*="input"]',
+  '[class*="select"]',
+  '[class*="btn"]',
+  '[class*="button"]',
+  '[class*="menu"]',
+  '[class*="dropdown"]',
+  '[class*="accordion"]',
+  '[class*="tabs"]',
+  '[class*="dsfr"]',
+  '.fr-btn',
+  '.fr-card',
+  '.fr-input',
+  '.fr-select',
+  '.fr-label',
+  '.fr-fieldset'
+].join(', ');
+
+const DYSLEXIA_BLOCK_SELECTOR = [
+  'p', 'li', 'dt', 'dd', 'blockquote', 'figcaption', 'caption', 'td', 'th', 'label', 'legend'
+].join(', ');
+
+const LOW_VISION_TEXT_SELECTOR = [
+  'p', 'li', 'dt', 'dd', 'blockquote', 'figcaption', 'caption', 'td', 'th', 'label',
+  'legend', 'small', 'strong', 'em', 'b', 'u', 'mark', 'time', 'summary', 'details',
+  'a', 'button', 'input', 'textarea', 'select', 'option', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'
+].join(', ');
+
+const ICON_FONT_SELECTOR = [
+  '.material-icons',
+  '.material-icons-outlined',
+  '.material-icons-round',
+  '.material-icons-sharp',
+  '.material-symbols-outlined',
+  '.material-symbols-rounded',
+  '.material-symbols-sharp',
+  '.fa',
+  '[class^="fa-"]',
+  '[class*=" fa-"]',
+  '.bi',
+  '[class^="bi-"]',
+  '[class*=" bi-"]',
+  '.icon',
+  '[class*=" icon-"]'
+].join(', ');
+
+const INTERACTIVE_SELECTOR = [
+  'a', 'button', '[role="button"]', 'input[type="button"]', 'input[type="submit"]',
+  'input[type="reset"]', 'summary', 'select', 'textarea'
+].join(', ');
+
+type RgbColor = { r: number; g: number; b: number };
+
+function parseRgbColor(value: string): RgbColor | null {
+  const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/i);
+  if (!match) return null;
+
+  return {
+    r: Number(match[1]),
+    g: Number(match[2]),
+    b: Number(match[3]),
+  };
+}
+
+function isFullyTransparent(value: string) {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'transparent') return true;
+
+  const match = normalized.match(/rgba\(\s*\d+\s*,\s*\d+\s*,\s*\d+\s*,\s*([0-9.]+)\s*\)/);
+  if (!match) return false;
+
+  return Number(match[1]) === 0;
+}
+
+function channelToLinear(channel: number) {
+  const normalized = channel / 255;
+  if (normalized <= 0.03928) return normalized / 12.92;
+  return Math.pow((normalized + 0.055) / 1.055, 2.4);
+}
+
+function relativeLuminance(color: RgbColor) {
+  const r = channelToLinear(color.r);
+  const g = channelToLinear(color.g);
+  const b = channelToLinear(color.b);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrastRatio(foreground: RgbColor, background: RgbColor) {
+  const l1 = relativeLuminance(foreground);
+  const l2 = relativeLuminance(background);
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function detectSiteTheme(): 'dark' | 'light' {
+  const bodyColor = parseRgbColor(window.getComputedStyle(document.body).backgroundColor);
+  const htmlColor = parseRgbColor(window.getComputedStyle(document.documentElement).backgroundColor);
+  const background = bodyColor || htmlColor || { r: 255, g: 255, b: 255 };
+  return relativeLuminance(background) < 0.35 ? 'dark' : 'light';
+}
+
+function detectPageType(): 'textual' | 'application' {
+  const textBlocks = document.querySelectorAll('p, article p, main p, section p, li, blockquote, h1, h2, h3, h4, h5, h6').length;
+  const controls = document.querySelectorAll('form, input, textarea, select, button, [role="button"], [role="tab"], [role="menuitem"], [role="dialog"], [contenteditable="true"], [class*="btn"], [class*="card"], [class*="form"], [class*="input"], [class*="menu"], [class*="tabs"], .fr-btn, .fr-card, .fr-input, .fr-select').length;
+  const appContainers = document.querySelectorAll('div[class], section[class], article[class], nav[class], [class*="dsfr"], [data-testid], [data-component]').length;
+
+  if (controls > Math.max(10, textBlocks * 1.2) || (controls >= 8 && appContainers >= 30)) {
+    return 'application';
+  }
+
+  return 'textual';
+}
+
+function resolveBackgroundColor(element: HTMLElement): RgbColor {
+  let current: HTMLElement | null = element;
+  while (current) {
+    const bgValue = window.getComputedStyle(current).backgroundColor;
+    const color = parseRgbColor(bgValue);
+    if (color) {
+      if (!isFullyTransparent(bgValue)) {
+        return color;
+      }
+    }
+    current = current.parentElement;
+  }
+
+  const bodyColor = parseRgbColor(window.getComputedStyle(document.body).backgroundColor);
+  const htmlColor = parseRgbColor(window.getComputedStyle(document.documentElement).backgroundColor);
+  return bodyColor || htmlColor || { r: 255, g: 255, b: 255 };
+}
+
+function ensureReadableContrast(element: HTMLElement, minRatio: number) {
+  const computed = window.getComputedStyle(element);
+  const foreground = parseRgbColor(computed.color);
+  if (!foreground) return;
+
+  const background = resolveBackgroundColor(element);
+  if (contrastRatio(foreground, background) >= minRatio) return;
+
+  const black = { r: 0, g: 0, b: 0 };
+  const white = { r: 255, g: 255, b: 255 };
+  const blackRatio = contrastRatio(black, background);
+  const whiteRatio = contrastRatio(white, background);
+  const bestColor = blackRatio >= whiteRatio ? 'rgb(0, 0, 0)' : 'rgb(255, 255, 255)';
+
+  if (!element.dataset.failcOriginalColor) {
+    element.dataset.failcOriginalColor = element.style.color || '';
+  }
+
+  element.style.setProperty('color', bestColor, 'important');
+  element.dataset.failcContrastAdjusted = '1';
+}
+
+function enhanceLowVisionContrast(root: ParentNode = document) {
+  const textElements = root.querySelectorAll(LOW_VISION_TEXT_SELECTOR);
+  textElements.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    if (node.closest('svg, img, video, canvas, [aria-hidden="true"]')) return;
+    const minRatio = node.tagName.toLowerCase() === 'a' ? 3 : 4.5;
+    ensureReadableContrast(node, minRatio);
+  });
+}
+
+function resetLowVisionContrastAdjustments() {
+  const adjusted = document.querySelectorAll('[data-failc-contrast-adjusted="1"]');
+  adjusted.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    const previous = node.dataset.failcOriginalColor || '';
+    if (previous) {
+      node.style.color = previous;
+    } else {
+      node.style.removeProperty('color');
+    }
+    delete node.dataset.failcOriginalColor;
+    delete node.dataset.failcContrastAdjusted;
+  });
+}
+
+function pauseAutoplayMedia() {
+  const mediaNodes = document.querySelectorAll('video, audio');
+  mediaNodes.forEach((node) => {
+    if (!(node instanceof HTMLMediaElement)) return;
+    if (!node.dataset.failcMediaProcessed) {
+      node.dataset.failcMediaProcessed = '1';
+      node.dataset.failcHadAutoplay = node.hasAttribute('autoplay') ? '1' : '0';
+    }
+    node.removeAttribute('autoplay');
+    try {
+      node.pause();
+      if (!Number.isNaN(node.currentTime)) {
+        node.currentTime = 0;
+      }
+    } catch {
+      // Ignore media controls blocked by site policies.
+    }
+  });
+
+  const marquees = document.querySelectorAll('marquee');
+  marquees.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    if (node.dataset.failcMarqueeProcessed === '1') return;
+    node.dataset.failcMarqueeProcessed = '1';
+    if (typeof (node as any).stop === 'function') {
+      (node as any).stop();
+    }
+  });
+}
+
+function restoreAutoplayMedia() {
+  const mediaNodes = document.querySelectorAll('video[data-failc-media-processed="1"], audio[data-failc-media-processed="1"]');
+  mediaNodes.forEach((node) => {
+    if (!(node instanceof HTMLMediaElement)) return;
+    if (node.dataset.failcHadAutoplay === '1') {
+      node.setAttribute('autoplay', 'autoplay');
+    }
+    delete node.dataset.failcMediaProcessed;
+    delete node.dataset.failcHadAutoplay;
+  });
+
+  const marquees = document.querySelectorAll('marquee[data-failc-marquee-processed="1"]');
+  marquees.forEach((node) => {
+    if (!(node instanceof HTMLElement)) return;
+    if (typeof (node as any).start === 'function') {
+      (node as any).start();
+    }
+    delete node.dataset.failcMarqueeProcessed;
+  });
+}
+
+function applyAntiEpilepsyRuntime() {
+  pauseAutoplayMedia();
+}
+
+function resetAntiEpilepsyRuntime() {
+  restoreAutoplayMedia();
+}
+
 // Données de simplification proposées par l'IA (voir BackgroundController / FETCH_ANALYSIS).
 // Vides par défaut : dans ce cas, applyVisualModifications() s'appuie uniquement sur les
 // règles statiques ci-dessous, qui restent TOUJOURS actives comme filet de sécurité —
@@ -62,9 +325,22 @@ function isSupportedSite() {
   return SUPPORTED_SITES.some(site => location.hostname.includes(site));
 }
 
-function applyProfileStyles(profile: Profile) {
+function applyProfileStyles(profile: Profile, previousProfile: Profile = activeProfile) {
   const existing = document.getElementById('failc-profile-style');
   if (existing) existing.remove();
+
+  if (previousProfile === 'anti-epilepsy' && profile !== 'anti-epilepsy') {
+    resetAntiEpilepsyRuntime();
+  }
+
+  if (previousProfile === 'low-vision' && profile !== 'low-vision') {
+    resetLowVisionContrastAdjustments();
+  }
+
+  const theme = detectSiteTheme();
+  const pageType = detectPageType();
+  document.documentElement.setAttribute('data-failc-theme', theme);
+  document.documentElement.setAttribute('data-failc-page-type', pageType);
 
   const baseStyle = document.getElementById('failc-base-style') || document.createElement('style');
   baseStyle.id = 'failc-base-style';
@@ -79,11 +355,84 @@ function applyProfileStyles(profile: Profile) {
   const style = document.createElement('style');
   style.id = 'failc-profile-style';
   style.textContent = profile === 'dyslexia'
-    ? `body, body * { font-family: Arial, sans-serif !important; line-height: 1.65 !important; text-align: left !important; letter-spacing: 0.01em !important; }`
+    ? `
+      ${TEXTUAL_ELEMENTS_SELECTOR} {
+        font-family: Verdana, Arial, sans-serif !important;
+        line-height: 1.6 !important;
+        letter-spacing: 0.05em !important;
+        word-spacing: 0.16em !important;
+        text-align: left !important;
+      }
+
+      html[data-failc-page-type="application"] ${APP_UI_TEXT_SELECTOR} {
+        font-family: Verdana, Arial, sans-serif !important;
+        line-height: 1.6 !important;
+        letter-spacing: 0.05em !important;
+        word-spacing: 0.16em !important;
+      }
+
+      html[data-failc-page-type="textual"] ${DYSLEXIA_BLOCK_SELECTOR} {
+        max-width: 70ch !important;
+      }
+
+      p {
+        margin-bottom: 1.5em !important;
+      }
+
+      ${ICON_FONT_SELECTOR} {
+        font-family: revert !important;
+        letter-spacing: normal !important;
+        word-spacing: normal !important;
+      }
+    `
     : profile === 'low-vision'
-      ? `body { background: #111 !important; color: #f8f8f8 !important; } body * { color: inherit !important; } body a, body button, body p, body li, body h1, body h2 { font-size: 1.2em !important; }`
-      : `* { animation: none !important; transition: none !important; } video { autoplay: false !important; }`;
+      ? `
+        ${LOW_VISION_TEXT_SELECTOR} {
+          font-size: max(1.25rem, 1em) !important;
+          font-weight: 550 !important;
+          line-height: 1.6 !important;
+        }
+
+        html[data-failc-page-type="application"] ${APP_UI_TEXT_SELECTOR} {
+          font-size: max(1.12rem, 1em) !important;
+          font-weight: 550 !important;
+          line-height: 1.55 !important;
+        }
+
+        ${INTERACTIVE_SELECTOR} {
+          min-width: 2.75rem !important;
+          min-height: 2.75rem !important;
+          padding: 0.35rem 0.65rem !important;
+        }
+
+        :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+          outline: 3px solid #f59e0b !important;
+          outline-offset: 3px !important;
+          box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.32) !important;
+        }
+      `
+      : `
+        :where(html, body, body *) {
+          animation: none !important;
+          transition: none !important;
+          scroll-behavior: auto !important;
+          caret-color: auto !important;
+        }
+
+        :where(*:hover, *:focus, *:active) {
+          transition: none !important;
+          animation: none !important;
+        }
+      `;
   document.head.appendChild(style);
+
+  if (profile === 'low-vision') {
+    enhanceLowVisionContrast();
+  }
+
+  if (profile === 'anti-epilepsy') {
+    applyAntiEpilepsyRuntime();
+  }
 }
 
 // ==========================================
@@ -478,6 +827,13 @@ function startDomObserver() {
     (window as any).__failcTimeout = setTimeout(() => {
       applyVisualModifications();
       refreshContactLinkIfNeeded();
+      if (activeProfile === 'low-vision') {
+        enhanceLowVisionContrast();
+      }
+
+      if (activeProfile === 'anti-epilepsy') {
+        applyAntiEpilepsyRuntime();
+      }
       detectAndReportForms();
     }, 500);
   });
@@ -757,16 +1113,9 @@ function applyVisualModifications() {
 function init() {
   startDomObserver();
 
-  if (!isSupportedSite()) return;
-
-  // Application immédiate de la simplification, de la détection de contact
-  // et de l'analyse IA (résumé), pour que tout soit prêt sans que l'utilisateur
-  // ait besoin de cliquer sur un bouton dans le popup.
-  applyVisualModifications();
-  refreshContactLinkIfNeeded();
-  detectAndReportForms();
-  void analyzePageSilent();
-
+  // Le profil d'affichage et le listener de messages doivent être actifs sur TOUS les sites,
+  // pas seulement les sites supportés, sinon les styles CSS (dyslexie, basse vision, etc.)
+  // ne s'appliquent jamais sur les sites non-supportés.
   chrome.storage.local.get(['failcProfile'], (result) => {
     activeProfile = (result.failcProfile as Profile) || 'standard';
     applyProfileStyles(activeProfile);
@@ -774,9 +1123,10 @@ function init() {
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message.type === 'SET_PROFILE') {
+      const previousProfile = activeProfile;
       activeProfile = message.profile;
-      applyProfileStyles(activeProfile);
-      applyVisualModifications();
+      applyProfileStyles(activeProfile, previousProfile);
+      if (isSupportedSite()) applyVisualModifications();
     }
     if (message.type === 'EXTRACT_PAGE_CONTENT') {
       sendResponse({ pageContent: extractPageContent() });
@@ -808,6 +1158,15 @@ function init() {
     }
     return false;
   });
+
+  if (!isSupportedSite()) return;
+
+  // Application immédiate de la simplification, de la détection de contact
+  // et de l'analyse IA (résumé) — uniquement sur les sites supportés.
+  applyVisualModifications();
+  refreshContactLinkIfNeeded();
+  detectAndReportForms();
+  void analyzePageSilent();
 }
 
 init();
