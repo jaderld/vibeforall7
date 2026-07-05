@@ -15,8 +15,8 @@ type AnalysisData = {
 const profiles: Array<{ id: Profile; label: string }> = [
   { id: 'standard', label: 'Standard' },
   { id: 'dyslexia', label: 'Dyslexie' },
-  { id: 'low-vision', label: 'Bonne vision' },
-  { id: 'anti-epilepsy', label: 'Anti-épilepsie' }
+  { id: 'low-vision', label: 'Basse vision' },
+  { id: 'anti-epilepsy', label: 'Photosensible' }
 ];
 
 const SIDEBAR_TEXT_SELECTOR = [
