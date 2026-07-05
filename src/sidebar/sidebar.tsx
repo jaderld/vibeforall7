@@ -80,7 +80,7 @@ const renderMarkdown = (text: string) => {
   });
 };
 
-const Popup = () => {
+const Sidebar = () => {
   const [activeProfile, setActiveProfile] = useState<Profile>('standard');
   const [aiProvider, setAiProvider] = useState<AIProvider>('openai');
   const [openAiApiKey, setOpenAiApiKey] = useState<string>('');
@@ -738,4 +738,4 @@ const Popup = () => {
   );
 };
 
-ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><Popup /></React.StrictMode>);
+ReactDOM.createRoot(document.getElementById('root')!).render(<React.StrictMode><Sidebar /></React.StrictMode>);
