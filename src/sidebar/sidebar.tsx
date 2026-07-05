@@ -455,6 +455,17 @@ const Popup = () => {
               <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: tokens.textSecondary, marginBottom: 6 }}>
                 Clé API Gemini
               </label>
+              <div className="api-key-help" style={{ marginTop: -2, marginBottom: 8, fontSize: 12.5, color: tokens.textSecondary }}>
+                Gratuit avec {' '}
+                <a
+                  href="https://aistudio.google.com/api-keys"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: tokens.accent, fontWeight: 700 }}
+                >
+                  Google AI Studio
+                </a>
+              </div>
               <input
                 type="password"
                 value={geminiApiKey}
