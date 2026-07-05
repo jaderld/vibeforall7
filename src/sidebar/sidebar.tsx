@@ -657,9 +657,77 @@ const Popup = () => {
             <><label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: tokens.textSecondary, marginBottom: 6 }}>Clé API OpenAI</label><input type="password" value={openAiApiKey} onChange={(event) => setOpenAiApiKey(event.target.value)} placeholder="sk-..." style={{ width: '100%', minHeight: 44, borderRadius: 8, border: `1px solid ${tokens.borderStrong}`, padding: '0 10px', marginBottom: 14, fontSize: 14, fontFamily: 'inherit' }} /></>
           )}
           {aiProvider === 'gemini' && (
-            <><label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: tokens.textSecondary, marginBottom: 6 }}>Clé API Gemini</label><input type="password" value={geminiApiKey} onChange={(event) => setGeminiApiKey(event.target.value)} placeholder="AIza..." style={{ width: '100%', minHeight: 44, borderRadius: 8, border: `1px solid ${tokens.borderStrong}`, padding: '0 10px', marginBottom: 14, fontSize: 14, fontFamily: 'inherit' }} /></>
+            <>
+              <label style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: tokens.textSecondary, marginBottom: 6 }}>
+                Clé API Gemini
+              </label>
+              <div className="api-key-help" style={{ marginTop: -2, marginBottom: 8, fontSize: 12.5, color: tokens.textSecondary }}>
+                Gratuit avec {' '}
+                <a
+                  href="https://aistudio.google.com/api-keys"
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: tokens.accent, fontWeight: 700 }}
+                >
+                  Google AI Studio
+                </a>
+              </div>
+              <input
+                type="password"
+                value={geminiApiKey}
+                onChange={(event) => setGeminiApiKey(event.target.value)}
+                placeholder="AIza..."
+                style={{
+                  width: '100%',
+                  minHeight: 44,
+                  borderRadius: 8,
+                  border: `1px solid ${tokens.borderStrong}`,
+                  padding: '0 10px',
+                  marginBottom: 14,
+                  fontSize: 14,
+                  fontFamily: 'inherit',
+                }}
+              />
+            </>
           )}
-          <button onClick={saveAiSettings} style={{ width: '100%', padding: '12px', background: tokens.accent, color: '#fff', border: 'none', borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: 'pointer', fontFamily: 'inherit' }} onMouseOver={(e) => (e.currentTarget.style.background = tokens.accentHover)} onMouseOut={(e) => (e.currentTarget.style.background = tokens.accent)}>Enregistrer le moteur IA</button>
+
+          <button
+            onClick={saveAiSettings}
+            style={{
+              width: '100%',
+              padding: '12px',
+              background: tokens.accent,
+              color: '#fff',
+              border: 'none',
+              borderRadius: 8,
+              fontWeight: 700,
+              fontSize: 14,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.background = tokens.accentHover)}
+            onMouseOut={(e) => (e.currentTarget.style.background = tokens.accent)}
+          >
+            Enregistrer le moteur IA
+          </button>
+
+          {aiStatus && (
+            <div
+              role="status"
+              style={{
+                marginTop: 10,
+                padding: '8px 10px',
+                borderRadius: 8,
+                background: aiStatus.includes('Veuillez') ? tokens.errorBg : tokens.successBg,
+                fontSize: 13,
+                color: aiStatus.includes('Veuillez') ? tokens.error : tokens.success,
+                fontWeight: 700,
+              }}
+            >
+              {aiStatus.includes('Veuillez') ? '⚠ ' : '✓ '}{aiStatus}
+            </div>
+          )}
+          
           {aiStatus && <div role="status" style={{ marginTop: 10, padding: '8px 10px', borderRadius: 8, background: aiStatus.includes('Veuillez') ? tokens.errorBg : tokens.successBg, fontSize: 13, color: aiStatus.includes('Veuillez') ? tokens.error : tokens.success, fontWeight: 700 }}>{aiStatus.includes('Veuillez') ? '⚠ ' : '✓ '}{aiStatus}</div>}
         </div>
       )}
