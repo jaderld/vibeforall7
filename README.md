@@ -12,6 +12,9 @@ It is built around FALC (Facile à Lire et à Comprendre — "Easy to Read and U
 
 ## Presentation video
 
+MAKE SURE SOUND IS ON FOR STT AND TTS DEMO
+
+https://github.com/jaderld/vibeforall7/blob/ce52c419df5c1680037a83acd4985543c98075fa/FALCon%20DEMO.mp4
 
 ---
 
