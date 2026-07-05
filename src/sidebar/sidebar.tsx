@@ -612,7 +612,7 @@ const Popup = () => {
   const profileCss = getSidebarProfileCss(activeProfile);
 
   return (
-    <div className={`failc-sidebar-root ${profileClass}`} style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 76, fontFamily: tokens.fontFamily, fontSize: 15, lineHeight: 1.55, background: tokens.bg, color: tokens.textPrimary }}>
+    <div className={`failc-sidebar-root ${profileClass}`} style={{ width: '100%', minHeight: '100vh', padding: 18, paddingBottom: 72, fontFamily: 'Arial, sans-serif',  background: '#f8fafc', color: '#0f172a' }}>
       {profileCss && <style>{profileCss}</style>}
       {/* En-tête */}
       <div style={{ background: tokens.accent, color: '#FFFFFF', padding: '14px 16px', borderRadius: tokens.radius, marginBottom: 16, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>

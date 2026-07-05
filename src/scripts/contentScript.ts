@@ -499,15 +499,13 @@ function findContactLink(): { label: string; url: string } | null {
       const isButton = el.tagName.toLowerCase() === 'button' || el.getAttribute('role') === 'button';
 
       if (!isButton) {
-        const hasUnsafeScheme = /^\s*(?:javascript|data|vbscript):/i.test(rawHref);
-
         // FILTRE 1 : On ignore directement les ancres brutes, la racine ou le JS
         if (
           !url ||
           rawHref === '#' ||
           rawHref === '/' ||
           rawHref.startsWith('#') ||
-          hasUnsafeScheme
+          rawHref.startsWith('javascript:')
         ) {
           continue;
         }
@@ -947,7 +945,7 @@ function applyVisualModifications() {
   // qui changeaient le sens de mots courants partout sur la page)
   const staticReplacements: Array<[RegExp, string | ReplacerFunc]> = [
     // 👤 PROFILS DYNAMIQUES ("Vous êtes un(e) X" -> "X")
-    [/\bvous êtes un(?:e)?\s+([a-zà-ÿ]+)\b/gi, (_match, mot) => mot.toUpperCase()],
+    [/\bvous êtes un(?:e)?\s+([a-zà-ÿ]+)\b/gi, (match, mot) => mot.toUpperCase()],
 
     // 🔍 RECHERCHE
     [/\bque cherchez[- ]vous\s*\??/gi, 'RECHERCHE'],
@@ -1115,16 +1113,9 @@ function applyVisualModifications() {
 function init() {
   startDomObserver();
 
-  if (!isSupportedSite()) return;
-
-  // Application immédiate de la simplification, de la détection de contact
-  // et de l'analyse IA (résumé), pour que tout soit prêt sans que l'utilisateur
-  // ait besoin de cliquer sur un bouton dans le popup.
-  applyVisualModifications();
-  refreshContactLinkIfNeeded();
-  detectAndReportForms();
-  void analyzePageSilent();
-
+  // Le profil d'affichage et le listener de messages doivent être actifs sur TOUS les sites,
+  // pas seulement les sites supportés, sinon les styles CSS (dyslexie, basse vision, etc.)
+  // ne s'appliquent jamais sur les sites non-supportés.
   chrome.storage.local.get(['failcProfile'], (result) => {
     activeProfile = (result.failcProfile as Profile) || 'standard';
     applyProfileStyles(activeProfile);
@@ -1135,7 +1126,7 @@ function init() {
       const previousProfile = activeProfile;
       activeProfile = message.profile;
       applyProfileStyles(activeProfile, previousProfile);
-      applyVisualModifications();
+      if (isSupportedSite()) applyVisualModifications();
     }
     if (message.type === 'EXTRACT_PAGE_CONTENT') {
       sendResponse({ pageContent: extractPageContent() });
@@ -1167,6 +1158,15 @@ function init() {
     }
     return false;
   });
+
+  if (!isSupportedSite()) return;
+
+  // Application immédiate de la simplification, de la détection de contact
+  // et de l'analyse IA (résumé) — uniquement sur les sites supportés.
+  applyVisualModifications();
+  refreshContactLinkIfNeeded();
+  detectAndReportForms();
+  void analyzePageSilent();
 }
 
 init();
