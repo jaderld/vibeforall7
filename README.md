@@ -4,21 +4,13 @@
 
 It combines **on-the-fly page simplification**, an **AI assistant that reads and explains the page for you**, **visual accessibility profiles**, and a **voice-guided form filler** — all running directly inside the browser, with no data sent anywhere except the AI provider you choose to configure.
 
-> Built during the **Capgemini × Hi!Paris VibeForAll hackathon**.
+It is built around FALC (Facile à Lire et à Comprendre — "Easy to Read and Understand"), the French accessibility standard for producing content that is clear and usable by people with cognitive, cognitive-adjacent, or reading difficulties. It gives people the efficient falcon's eyes to see through the dense administrative procedures.
 
-> **Naming note:** the project was previously called *FAILC*. Some internal identifiers (storage key prefixes such as `failc:`, the context-menu id `failc-selection`, etc.) still reference the old name in the codebase and will be renamed in a future cleanup pass : this doesn't affect functionality.
+> Built during the **Capgemini × Hi!Paris VibeForAll hackathon**.
 
 ---
 
-## Presnetation screenshots
-
-> **TODO for the team:** add real screenshots/GIFs here before submission. Create a `docs/screenshots/` folder at the root of the repo, drop your images there, and reference them like this:
->
-> ```markdown
-> ![Popup overview](docs/screenshots/popup-overview.png)
-> ```
-
-Suggested screenshots to capture (in this order, so the README tells a story):
+## Presentation video
 
 | # | What to capture | Suggested filename |
 |---|---|---|

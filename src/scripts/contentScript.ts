@@ -19,6 +19,15 @@ type StorageData = {
 };
 
 const STORAGE_PREFIX = 'failc:';
+
+// Clés de stockage utilisées pour la configuration IA (doivent correspondre
+// EXACTEMENT à AI_STORAGE_KEYS dans Sidebar.tsx — idéalement à extraire dans
+// un fichier constants.ts partagé pour éviter tout désync silencieux).
+const AI_KEY_STORAGE_KEYS = {
+  openaiKey: 'failcOpenAiApiKey',
+  geminiKey: 'failcGeminiApiKey',
+} as const;
+
 const TERM_DEFINITIONS: GlossaryEntry[] = [
   { term: 'avis d\'imposition', definition: 'Document envoyé par l’administration pour expliquer le montant de votre impôt.' },
   { term: 'cotisation', definition: 'Montant payé pour financer un service ou une assurance.' },
@@ -452,6 +461,23 @@ function collectBlocks() {
   return blocks.slice(0, 60);
 }
 
+// Vérifie si une clé API (OpenAI ou Gemini) a été configurée par l'utilisateur.
+// Tant qu'aucune clé n'est renseignée, on ne déclenche pas l'appel FETCH_ANALYSIS
+// (résumé/simplification IA) — mais tout le traitement local (surlignage, glossaire
+// statique, extraction de contact) continue de fonctionner normalement.
+function hasConfiguredAiKey(): Promise<boolean> {
+  return new Promise((resolve) => {
+    chrome.storage.local.get(
+      [AI_KEY_STORAGE_KEYS.openaiKey, AI_KEY_STORAGE_KEYS.geminiKey],
+      (result) => {
+        const openaiKey = (result[AI_KEY_STORAGE_KEYS.openaiKey] || '').toString().trim();
+        const geminiKey = (result[AI_KEY_STORAGE_KEYS.geminiKey] || '').toString().trim();
+        resolve(Boolean(openaiKey || geminiKey));
+      }
+    );
+  });
+}
+
 // Mots-clés désignant un accès au contact/support/prise de rendez-vous.
 // On priorise les mots-clés "forts" (sans ambiguïté) avant les mots-clés "faibles"
 // (aide/FAQ/support peuvent aussi désigner autre chose qu'un contact direct).
@@ -599,20 +625,60 @@ function buildLiteralRegex(original: string): RegExp {
   return new RegExp(escapeRegExp(original), 'gi');
 }
 
+// Construit le paquet de données local (contact + glossaire statique), toujours
+// disponible même sans IA. Utilisé à la fois par le chemin "sans clé API" et par
+// le chemin "avec clé API" (pour ne pas dupliquer cette logique).
+function buildLocalAnalysisParts(visibleText: string) {
+  const contactLink = findContactLink();
+  const extractedContact = extractContactInfo(visibleText);
+
+  return {
+    glossaire: TERM_DEFINITIONS.filter(e => visibleText.toLowerCase().includes(e.term.toLowerCase())),
+    contactInfo: {
+      contactLink: contactLink?.url || '',
+      contactLabel: contactLink?.label || '',
+      telephone: extractedContact.telephone || '',
+      email: extractedContact.email || '',
+      adresse: extractedContact.adresse || '',
+      horaires: extractedContact.horaires || ''
+    },
+  };
+}
+
 async function analyzePageSilent() {
   chrome.runtime.sendMessage({ type: 'ANALYSIS_STARTED' }).catch(() => {});
   const blocks = collectBlocks();
   const visibleText = blocks.map(b => b.text).join(' ');
-  const contactLink = findContactLink();
-  const extractedContact = extractContactInfo(visibleText);
+  const cleanUrl = location.href.split('#')[0];
+  const storageKey = `${STORAGE_PREFIX}${cleanUrl}`;
+  const localParts = buildLocalAnalysisParts(visibleText);
+
+  // --- Découplage IA / local : si aucune clé API n'est configurée, on s'arrête
+  // ici. Le surlignage, le glossaire statique et l'extraction de contact restent
+  // pleinement fonctionnels (via applyVisualModifications, déjà appelé dans init()
+  // indépendamment de cette fonction) ; seul le résumé/les étapes générés par IA
+  // ne sont pas disponibles, avec un message explicite plutôt qu'une erreur brute.
+  const aiKeyConfigured = await hasConfiguredAiKey();
+  if (!aiKeyConfigured) {
+    const analysisData = {
+      summary: "Ajoutez une clé API (OpenAI ou Gemini) dans les réglages de l'extension pour activer le résumé et les étapes générés par IA.",
+      steps: [] as string[],
+      ...localParts,
+    };
+
+    await chrome.storage.local.set({ [storageKey]: analysisData });
+    chrome.runtime.sendMessage({ type: 'ANALYSIS_COMPLETE', data: analysisData }).catch(() => {});
+
+    // Pas de aiReplacements/aiGlossary/aiUiLabels à appliquer ici : on ré-applique
+    // simplement les modifications visuelles pour rafraîchir l'affichage local.
+    applyVisualModifications();
+    return;
+  }
 
   try {
     const response = await new Promise<any>((resolve) => {
       chrome.runtime.sendMessage({ type: 'FETCH_ANALYSIS', payload: { blocks } }, resolve);
     });
-
-    const cleanUrl = location.href.split('#')[0];
-    const storageKey = `${STORAGE_PREFIX}${cleanUrl}`;
 
     // On vérifie si l'IA a échoué, mais ON NE FAIT PLUS CRASHER LE SCRIPT (pas de "throw")
     const hasAiError = chrome.runtime.lastError || !response || response.error;
@@ -636,15 +702,7 @@ async function analyzePageSilent() {
       steps: hasAiError ? ["Suivez les instructions affichées sur la page."] : (response.steps || []),
 
       // La partie locale (contacts et glossaire) fonctionnera TOUJOURS
-      glossaire: TERM_DEFINITIONS.filter(e => visibleText.toLowerCase().includes(e.term.toLowerCase())),
-      contactInfo: {
-        contactLink: contactLink?.url || '',
-        contactLabel: contactLink?.label || '',
-        telephone: extractedContact.telephone || '',
-        email: extractedContact.email || '',
-        adresse: extractedContact.adresse || '',
-        horaires: extractedContact.horaires || ''
-      },
+      ...localParts,
     };
 
     // On sauvegarde tout
@@ -1157,6 +1215,20 @@ function init() {
       submitOrAdvance(message.formSelector, message.submitSelector);
     }
     return false;
+  });
+
+  // Relance automatique de l'analyse IA dès qu'une clé API est ajoutée ou modifiée
+  // dans les réglages (Sidebar.tsx écrit directement dans chrome.storage.local).
+  // Sans ce listener, l'utilisateur devrait cliquer sur "Relancer" manuellement
+  // après avoir enregistré sa clé.
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    const keyChanged =
+      AI_KEY_STORAGE_KEYS.openaiKey in changes ||
+      AI_KEY_STORAGE_KEYS.geminiKey in changes;
+    if (keyChanged && isSupportedSite()) {
+      void analyzePageSilent();
+    }
   });
 
   if (!isSupportedSite()) return;
