@@ -5,7 +5,8 @@ import { TabService } from './services/tabService';
 import { DefaultWebPageStrategy } from './strategies/DefaultWebPageStrategy';
 import { GoogleDocsStrategy } from './strategies/GoogleDocsStrategy';
 import { YouTubeStrategy } from './strategies/YouTubeStrategy';
-import { ExtensionMessage } from './types';
+import { ChatHistoryTurn, ExtensionMessage } from './types';
+import { FormFillController } from './controllers/FormFillController';
 
 type AIProvider = 'openai' | 'gemini';
 
@@ -15,8 +16,8 @@ const AI_STORAGE_KEYS = {
   geminiKey: 'failcGeminiApiKey',
 } as const;
 
-const OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
-const GEMINI_API_URL_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
+const OPENAI_API_URL = '[https://api.openai.com/v1/chat/completions](https://api.openai.com/v1/chat/completions)';
+const GEMINI_API_URL_BASE = '[https://generativelanguage.googleapis.com/v1beta/models](https://generativelanguage.googleapis.com/v1beta/models)';
 const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const GEMINI_PRIMARY_MODEL = 'models/gemini-3.1-flash-lite';
 const GEMINI_MODELS_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -57,10 +58,47 @@ interface GeminiModelInfo {
   supportedGenerationMethods?: string[];
 }
 
-function extractJsonResponse(content: string): string {
-  const trimmed = content.trim();
-  const jsonMatch = trimmed.match(/\{[\s\S]*\}$/);
-  return jsonMatch ? jsonMatch[0] : trimmed;
+// --------------------------------------------------------
+// FONCTION DE NETTOYAGE JSON (Correction Gemini Markdown)
+// --------------------------------------------------------
+function cleanAndParseJSON(aiResponse: string) {
+  try {
+    // 1. On retire les balises Markdown ```json et ```
+    let cleanedText = aiResponse.replace(/```json/gi, '').replace(/```/g, '').trim();
+    
+    // 2. Sécurité supplémentaire : on extrait de force ce qui se trouve entre { et }
+    // au cas où Gemini aurait ajouté du blabla avant ou après (ex: "Voici le JSON :")
+    const firstBrace = cleanedText.indexOf('{');
+    const lastBrace = cleanedText.lastIndexOf('}');
+    
+    // On extrait aussi pour les tableaux [ ] au cas où l'IA renverrait une liste
+    const firstBracket = cleanedText.indexOf('[');
+    const lastBracket = cleanedText.lastIndexOf(']');
+
+    if (firstBrace !== -1 && lastBrace !== -1 && (firstBracket === -1 || firstBrace < firstBracket)) {
+      cleanedText = cleanedText.substring(firstBrace, lastBrace + 1);
+    } else if (firstBracket !== -1 && lastBracket !== -1) {
+      cleanedText = cleanedText.substring(firstBracket, lastBracket + 1);
+    }
+
+    // 3. On parse le JSON assaini
+    return JSON.parse(cleanedText);
+  } catch (error) {
+    console.error("Échec critique du parsing JSON. Texte brut renvoyé par l'IA :", aiResponse);
+    throw error;
+  }
+}
+
+// Construit un rendu texte de l'historique pour le donner en contexte au modèle
+function formatChatHistory(history: ChatHistoryTurn[] | undefined): string {
+  if (!Array.isArray(history) || history.length === 0) {
+    return 'Aucun échange précédent.';
+  }
+
+  return history
+    .filter((turn) => turn && typeof turn.content === 'string')
+    .map((turn) => `${turn.role === 'user' ? 'Utilisateur' : 'Assistant'} : ${turn.content}`)
+    .join('\n');
 }
 
 // --------------------------------------------------------
@@ -138,8 +176,8 @@ async function callOpenAI(
 
     const data = await response.json();
     const textResponse = data.choices[0].message.content;
-    
-    return expectJson ? JSON.parse(textResponse) : textResponse;
+
+    return expectJson ? cleanAndParseJSON(textResponse) : textResponse;
   } catch (error: unknown) {
     console.error('Erreur appel OpenAI :', error);
     throw error;
@@ -175,8 +213,7 @@ async function callGemini(
 
   for (const model of modelCandidates) {
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/${model}:generateContent?key=${apiKey}`,
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/${model}:generateContent?key=${apiKey}`,
         {
           method: 'POST',
           headers: {
@@ -214,7 +251,7 @@ async function callGemini(
         throw new Error('Réponse Gemini vide');
       }
 
-      return expectJson ? JSON.parse(extractJsonResponse(textResponse)) : textResponse;
+      return expectJson ? cleanAndParseJSON(textResponse) : textResponse;
     } catch (error: unknown) {
       lastError = error instanceof Error ? error : new Error(String(error));
       break;
@@ -311,6 +348,7 @@ const tabContext = new TabContext([
 ]);
 const contextManager = new ContextManager(tabContext, tabService);
 const backgroundController = new BackgroundController(contextManager, callAI);
+const formFillController = new FormFillController(callAI);
 
 // --------------------------------------------------------
 // 3. GESTION DES MESSAGES
@@ -319,18 +357,34 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
   if (backgroundController.handleMessage(message, sender, sendResponse)) {
     return true;
   }
-  
-  // CHAT CONTEXTUEL (Question/Réponse)
+
+  if (formFillController.handleMessage(message, sender, sendResponse)) {
+    return true;
+  }
+
+  // CHAT CONTEXTUEL (Question/Réponse) — avec mémoire de conversation et corrélation par requestId
   if (message?.type === 'ASK_GEMINI_CONTEXT') {
+    const requestId = message.requestId;
+
     (async () => {
       try {
-        const systemPrompt = "Tu es un assistant d'accessibilité bienveillant. Réponds de manière directe, rassurante et très facile à comprendre.";
-        const userPrompt = `Contexte de la page sur laquelle je me trouve : "${message.context || 'Aucun.'}"\n\nMa question : "${message.question || ''}"`;
-        
+        const systemPrompt = "Tu es un assistant d'accessibilité bienveillant, spécialisé dans l'aide aux démarches administratives françaises (CAF, URSSAF, impôts, etc.). Réponds de manière directe, rassurante et très facile à comprendre (langage FALC). Va à l'essentiel, les réponses doivent être courtes, évite les longues phrases rédigées, va à l'essentiel."
+  + "Pour les questions portant sur des éléments précis de la page (où se trouve un bouton, comment remplir un champ, quelle démarche faire ici), base-toi en priorité sur le contexte de la page fourni. "
+  + "Pour les questions plus générales sur le sujet administratif ou fiscal concerné par la page (définitions, notions, noms propres, acronymes, sigles, etc même des questions de compréhension générale), tu peux répondre avec tes connaissances générales même si ce n'est pas mentionné sur la page, en donnant une explication simple et accessible. "
+  + "N'indique que tu ne sais pas que si la question sort réellement du domaine administratif/fiscal ou si tu n'as vraiment pas l'information.";
+
+        const historyText = formatChatHistory(message.history);
+
+        const userPrompt = `Contexte de la page sur laquelle je me trouve : "${message.context || 'Aucun.'}"\n\nHistorique de la conversation :\n${historyText}\n\nNouvelle question de l'utilisateur : "${message.question || ''}"`;
+
         const replyText = await callAI(systemPrompt, userPrompt, false);
-        chrome.runtime.sendMessage({ type: 'CHAT_REPLY', reply: replyText });
+        chrome.runtime.sendMessage({ type: 'CHAT_REPLY', reply: replyText, requestId });
       } catch (error: unknown) {
-        chrome.runtime.sendMessage({ type: 'CHAT_REPLY', reply: "❌ Désolé, erreur de connexion avec l'IA." });
+        const details = error instanceof Error ? error.message : '';
+        const friendlyMessage = details && /clé|api key|authorization/i.test(details)
+          ? "❌ Aucune clé API valide n'est configurée. Ouvrez les paramètres pour en ajouter une."
+          : "❌ Désolé, une erreur est survenue pendant la connexion à l'IA.";
+        chrome.runtime.sendMessage({ type: 'CHAT_REPLY', reply: friendlyMessage, requestId });
       }
     })();
     return true;
@@ -342,7 +396,7 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, sender, sendRes
       const status = message.status;
       chrome.action.setBadgeText({ text: status === 'ok' ? '✓' : '!' });
       chrome.action.setBadgeBackgroundColor({ color: status === 'ok' ? '#2e7d32' : '#c62828' });
-      setTimeout(() => chrome.action.setBadgeText({ text: '' }), 3000); 
+      setTimeout(() => chrome.action.setBadgeText({ text: '' }), 3000);
     } catch (e: unknown) {
       // ignore
     }
